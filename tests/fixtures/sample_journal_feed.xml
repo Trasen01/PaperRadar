@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Sample Journal Feed</title>
+    <link>https://example.org/journal</link>
+    <description>PaperRadar test feed</description>
+    <item>
+      <title>Photonic Neural Network for Scientific Inference</title>
+      <link>https://example.org/paper-1</link>
+      <pubDate>Mon, 01 Jun 2026 10:00:00 GMT</pubDate>
+      <description><![CDATA[We demonstrate optical matrix multiplication using an integrated photonic processor.]]></description>
+    </item>
+    <item>
+      <title>Scalable Integrated Photonic Circuit</title>
+      <link>https://example.org/paper-2</link>
+      <pubDate>Tue, 02 Jun 2026 10:00:00 GMT</pubDate>
+      <description><![CDATA[The abstract describes photonic computing with a programmable photonic processor.]]></description>
+    </item>
+    <item>
+      <title>Biomedical Imaging with Novel Contrast</title>
+      <link>https://example.org/paper-3</link>
+      <pubDate>Wed, 03 Jun 2026 10:00:00 GMT</pubDate>
+      <description><![CDATA[This biomedical imaging study reports microscopy measurements.]]></description>
+    </item>
+  </channel>
+</rss>

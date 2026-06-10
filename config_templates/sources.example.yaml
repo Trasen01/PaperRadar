@@ -1,0 +1,28 @@
+sources_version: 2
+
+journal_sources:
+  - name: Nature Photonics
+    publisher: Springer Nature
+    type: rss
+    enabled: true
+    feed_url: https://www.nature.com/nphoton/journal/vaop/ncurrent/rss.rdf
+    homepage: https://www.nature.com/nphoton/
+    quality_score: 20
+
+top_journals:
+  - name: Nature
+    publisher: Springer Nature
+    issn:
+      - "0028-0836"
+      - "1476-4687"
+    homepage: https://www.nature.com/
+    crossref_enabled: true
+    quality_score: 20
+  - name: Science
+    publisher: AAAS
+    issn:
+      - "0036-8075"
+      - "1095-9203"
+    homepage: https://www.science.org/journal/science
+    crossref_enabled: true
+    quality_score: 20

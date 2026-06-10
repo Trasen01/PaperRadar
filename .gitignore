@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build artifacts
+build/
+dist/
+*.spec
+!PaperRadar.release.spec
+!PaperRadar.debug.spec
+
+# Runtime user data
+config/
+profiles/
+data/
+reports/
+logs/
+*.sqlite
+*.sqlite3
+*.db
+PaperRadar.log
+
+# Local configuration and secrets
+.env
+.env.*
+config/*.local.yaml
+config/user*.yaml
+
+# OS/editor temporary files
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak
+~$*
+.idea/
+.vscode/

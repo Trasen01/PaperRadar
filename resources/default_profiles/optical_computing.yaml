@@ -1,0 +1,175 @@
+profile_version: 1
+profile_id: optical_computing
+display_name: 光计算
+description: Optical and photonic computing, including optical neural networks, photonic processors, matrix multiplication, convolution, analog solvers, and neuromorphic photonics.
+
+search_queries:
+  - photonic computing
+  - optical computing
+  - optical neural network
+  - photonic neural network
+  - diffractive neural network
+  - photonic matrix multiplication
+  - optical matrix multiplication
+  - matrix-vector multiplication photonic
+  - optical convolution
+  - photonic processor
+  - programmable photonic processor
+  - photonic accelerator
+  - optical Ising machine
+  - photonic reservoir computing
+  - neuromorphic photonics
+
+keyword_groups:
+  high_precision_core:
+    priority: high
+    terms:
+      - photonic computing
+      - optical computing
+      - analog optical computing
+      - coherent optical computing
+      - all-optical computing
+      - optical information processing
+      - photonic information processing
+  optical_neural_networks:
+    priority: high
+    terms:
+      - optical neural network
+      - optical neural networks
+      - photonic neural network
+      - photonic neural networks
+      - integrated photonic neural network
+      - all-optical neural network
+      - diffractive neural network
+      - diffractive deep neural network
+      - optical deep learning
+      - photonic deep learning
+      - optical machine learning
+      - photonic machine learning
+      - optical inference
+      - photonic inference
+  linear_algebra_computing:
+    priority: high
+    terms:
+      - optical matrix multiplication
+      - photonic matrix multiplication
+      - optical matrix-vector multiplication
+      - photonic matrix-vector multiplication
+      - matrix-vector multiplication
+      - matrix-matrix multiplication
+      - optical tensor processing
+      - photonic tensor processing
+      - photonic tensor core
+      - optical linear transformation
+      - photonic linear transformation
+      - optical multiply-accumulate
+      - photonic multiply-accumulate
+      - multiply-accumulate
+  convolution_and_fourier:
+    priority: high
+    terms:
+      - optical convolution
+      - photonic convolution
+      - optical convolutional neural network
+      - photonic convolutional neural network
+      - Fourier optical computing
+      - optical Fourier transform
+      - photonic Fourier transform
+      - optical correlator
+      - optical convolution processor
+  equation_solver_and_analog:
+    priority: high
+    terms:
+      - optical solver
+      - photonic solver
+      - optical equation solver
+      - optical differential equation solver
+      - analog optical solver
+      - wave-based computing
+      - wave computing
+      - Ising solver
+      - optical Ising machine
+      - photonic Ising machine
+      - coherent Ising machine
+  processors_and_architectures:
+    priority: high
+    terms:
+      - photonic processor
+      - optical processor
+      - photonic accelerator
+      - optical accelerator
+      - optical processing unit
+      - photonic processing unit
+      - programmable photonic processor
+      - programmable optical processor
+      - integrated photonic processor
+      - photonic neural processor
+      - photonic AI accelerator
+      - optical computing chip
+  neuromorphic_photonics:
+    priority: high
+    terms:
+      - neuromorphic photonics
+      - neuromorphic photonic computing
+      - optical neuromorphic computing
+      - photonic neuromorphic computing
+      - photonic reservoir computing
+      - optical reservoir computing
+      - optical neuron
+      - photonic neuron
+      - photonic synapse
+      - photonic spiking neural network
+  supporting_platforms:
+    priority: low
+    terms:
+      - MZI mesh
+      - Mach-Zehnder mesh
+      - interferometer mesh
+      - microring weight bank
+      - microring resonator array
+      - silicon photonics
+      - integrated photonics
+      - programmable photonics
+      - diffractive optical element
+      - spatial light modulator
+      - SLM
+      - metasurface
+      - optical frequency comb
+      - wavelength division multiplexing
+      - WDM
+      - electro-optic modulator
+      - phase-change photonics
+
+exclude_terms:
+  - biomedical imaging
+  - bioimaging
+  - clinical imaging
+  - ophthalmology
+  - endoscopy
+  - microscopy
+  - optical coherence tomography
+  - OCT
+  - remote sensing
+  - lidar
+  - optical communication
+  - fiber communication
+  - free-space optical communication
+  - optical encryption
+  - image encryption
+  - solar cell
+  - photovoltaic
+  - photocatalysis
+  - quantum key distribution
+  - QKD
+
+recommended_journals:
+  - Nature Photonics
+  - Nature
+  - Science
+  - Nature Communications
+  - Science Advances
+  - Light: Science & Applications
+  - Optica
+  - Physical Review Letters
+  - Advanced Photonics
+  - Laser & Photonics Reviews

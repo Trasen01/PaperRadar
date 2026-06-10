@@ -1,0 +1,20 @@
+app_version: "0.2.0"
+active_profile: optical_computing
+first_run_completed: false
+days_back: 7
+min_score: 40
+auto_check_daily: false
+use_arxiv: true
+use_top_journals: true
+use_crossref: true
+show_arxiv: true
+show_top_journals: true
+show_crossref: true
+debug:
+  keep_unmatched_journal_papers: true
+  log_filtered_papers: true
+crossref:
+  rows_per_query: 20
+  max_queries_per_run: 200
+  request_delay_seconds: 0.5
+  cache_hours: 24

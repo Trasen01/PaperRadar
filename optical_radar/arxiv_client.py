@@ -9,7 +9,9 @@ import requests
 from dateutil import parser as date_parser
 
 from .models import Paper
+from .network import retry_call
 from .profile_manager import active_profile_search_queries
+from .profile_terms import filter_research_terms
 from .utils import normalize_space
 
 logger = logging.getLogger(__name__)
@@ -26,12 +28,14 @@ DEFAULT_QUERY_TERMS = [
 
 
 class ArxivClient:
-    def __init__(self, timeout: int = 20) -> None:
+    def __init__(self, timeout: int = 20, max_retries: int = 3, retry_delay_seconds: int = 3) -> None:
         self.timeout = timeout
+        self.max_retries = max_retries
+        self.retry_delay_seconds = retry_delay_seconds
 
     def fetch_recent(self, days_back: int = 7, max_results: int = 100) -> list[Paper]:
         category_query = " OR ".join(f"cat:{cat}" for cat in DEFAULT_CATEGORIES)
-        terms = active_profile_search_queries(max_queries=20) or DEFAULT_QUERY_TERMS
+        terms = filter_research_terms(active_profile_search_queries(max_queries=20), for_query=True) or DEFAULT_QUERY_TERMS
         term_query = " OR ".join(f'all:"{term}"' for term in terms)
         search_query = f"({category_query}) AND ({term_query})"
         params = {
@@ -43,7 +47,14 @@ class ArxivClient:
         }
         url = f"{ARXIV_API_URL}?{urlencode(params)}"
         logger.info("Fetching arXiv: %s", url)
-        response = requests.get(url, timeout=self.timeout)
+        response = retry_call(
+            lambda: requests.get(url, timeout=self.timeout),
+            source_type="arxiv",
+            query=search_query,
+            timeout=self.timeout,
+            max_retries=self.max_retries,
+            retry_delay_seconds=self.retry_delay_seconds,
+        )
         response.raise_for_status()
 
         cutoff = datetime.now(timezone.utc) - timedelta(days=max(days_back, 0))

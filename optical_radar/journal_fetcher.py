@@ -12,6 +12,7 @@ from dateutil import parser as date_parser
 from requests.exceptions import SSLError
 
 from .models import Paper
+from .network import retry_call
 from .settings import load_sources
 from .utils import normalize_space
 
@@ -60,8 +61,10 @@ class JournalFetchResult:
 
 
 class JournalRssFetcher:
-    def __init__(self, timeout: int = 20) -> None:
+    def __init__(self, timeout: int = 20, max_retries: int = 3, retry_delay_seconds: int = 3) -> None:
         self.timeout = timeout
+        self.max_retries = max_retries
+        self.retry_delay_seconds = retry_delay_seconds
 
     def fetch_recent(self, days_back: int = 7, max_results: int | None = None) -> JournalFetchResult:
         if feedparser is None:
@@ -227,20 +230,30 @@ class JournalRssFetcher:
         return papers
 
     def _get(self, feed_url: str) -> requests.Response:
-        try:
-            return requests.get(
-                feed_url,
-                timeout=self.timeout,
-                headers={"User-Agent": "PaperRadar/1.0"},
-            )
-        except SSLError as exc:
-            logger.warning("SSL verification failed for %s, retrying without verification: %s", feed_url, exc)
-            return requests.get(
-                feed_url,
-                timeout=self.timeout,
-                headers={"User-Agent": "PaperRadar/1.0"},
-                verify=False,
-            )
+        def request_once() -> requests.Response:
+            try:
+                return requests.get(
+                    feed_url,
+                    timeout=self.timeout,
+                    headers={"User-Agent": "PaperRadar/1.0"},
+                )
+            except SSLError as exc:
+                logger.warning("SSL verification failed for %s, retrying without verification: %s", feed_url, exc)
+                return requests.get(
+                    feed_url,
+                    timeout=self.timeout,
+                    headers={"User-Agent": "PaperRadar/1.0"},
+                    verify=False,
+                )
+
+        return retry_call(
+            request_once,
+            source_type="journal_rss",
+            query=feed_url,
+            timeout=self.timeout,
+            max_retries=self.max_retries,
+            retry_delay_seconds=self.retry_delay_seconds,
+        )
 
     def _parse_entry(self, source: dict[str, Any], entry: Any) -> Paper:
         source_name = normalize_space(str(source.get("name") or "Unknown Journal"))

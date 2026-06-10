@@ -10,6 +10,7 @@ from typing import Any
 import yaml
 
 from .settings import load_settings, save_settings
+from .profile_terms import filter_research_terms, is_likely_journal_name
 from .utils import CONFIG_DIR, PROFILES_DIR, RESOURCE_DIR, ensure_directories
 from .version import __version__
 
@@ -266,23 +267,26 @@ def _normalize_profile(data: dict[str, Any], hint: str | None, warnings: list[st
 
     groups = data.get("keyword_groups")
     if not isinstance(groups, dict):
-        queries = _as_str_list(data.get("search_queries"))
+        queries = filter_research_terms(_as_str_list(data.get("search_queries")), for_query=True)
         data["keyword_groups"] = {"core": {"priority": "high", "terms": queries or [str(data["display_name"])]}}
         warnings.append("已根据 search_queries 自动生成 keyword_groups。")
     else:
         normalized_groups: dict[str, dict[str, Any]] = {}
         for name, group in groups.items():
             if isinstance(group, dict):
-                terms = _as_str_list(group.get("terms"))
+                terms = filter_research_terms(_as_str_list(group.get("terms")))
                 priority = group.get("priority") if group.get("priority") in {"high", "medium", "low"} else "medium"
             elif isinstance(group, list):
-                terms = _as_str_list(group)
+                terms = filter_research_terms(_as_str_list(group))
                 priority = "medium"
                 warnings.append(f"已修复 keyword_groups.{name} 的结构。")
             else:
-                terms = [str(group)] if str(group).strip() else []
+                terms = filter_research_terms([str(group)] if str(group).strip() else [])
                 priority = "medium"
                 warnings.append(f"已修复 keyword_groups.{name} 的结构。")
+            if not terms:
+                warnings.append(f"Filtered non-research journal/source terms from keyword_groups.{name}.")
+                continue
             normalized_groups[str(name)] = {"priority": priority, "terms": terms}
             if len(normalized_groups) >= 10:
                 warnings.append("keyword_groups 超过 10 组，已保留前 10 组。")
@@ -297,10 +301,10 @@ def _normalize_profile(data: dict[str, Any], hint: str | None, warnings: list[st
         if not high_terms:
             for group in data["keyword_groups"].values():
                 high_terms.extend(group.get("terms") or [])
-        data["search_queries"] = _unique_strings(high_terms)[:15]
+        data["search_queries"] = filter_research_terms(_unique_strings(high_terms), for_query=True)[:15]
         warnings.append("已根据 keyword_groups 自动生成 search_queries。")
 
-    data["search_queries"] = _unique_strings(_as_str_list(data.get("search_queries")))[:20]
+    data["search_queries"] = filter_research_terms(_unique_strings(_as_str_list(data.get("search_queries"))), for_query=True)[:20]
     data["exclude_terms"] = _unique_strings(_as_str_list(data.get("exclude_terms")))
     journals = _unique_strings(["Nature", "Science", *_as_str_list(data.get("recommended_journals"))])
     if len(journals) > 10:
@@ -337,11 +341,14 @@ def extract_keywords_from_text(raw_text: str) -> list[str]:
             continue
         if not re.search(r"[A-Za-z]", text):
             continue
+        if is_likely_journal_name(text):
+            continue
         candidates.append(text)
-    return _unique_strings(candidates)[:80]
+    return filter_research_terms(_unique_strings(candidates), for_query=True)[:80]
 
 
 def _profile_from_keywords(keywords: list[str], hint: str | None) -> dict[str, Any]:
+    keywords = filter_research_terms(keywords, for_query=True)
     display_name = hint.strip() if hint and hint.strip() else "未命名研究方向"
     profile_id = make_profile_id(display_name or (keywords[0] if keywords else "profile"))
     core_terms = keywords[:20]

@@ -10,7 +10,9 @@ import requests
 
 from .metadata_enricher import clean_abstract, enrich_paper_metadata
 from .models import Paper
+from .network import retry_call
 from .profile_manager import active_profile_search_queries
+from .profile_terms import filter_research_terms
 from .settings import load_keywords, load_sources
 from .utils import normalize_space
 
@@ -59,17 +61,29 @@ class CrossrefResult:
 
 
 def build_search_queries_from_keywords(profile: dict[str, list[str]] | None = None, max_queries: int = 20) -> list[str]:
-    queries = active_profile_search_queries(max_queries=max_queries)
+    fallback_terms: list[str] = []
+    for group_name, group in (profile or {}).items():
+        if str(group_name).lower() == "exclude":
+            continue
+        fallback_terms.extend(group or [])
+    if fallback_terms:
+        queries = filter_research_terms(fallback_terms, for_query=True)
+        if queries:
+            return queries[:max_queries]
+
+    queries = filter_research_terms(active_profile_search_queries(max_queries=max_queries), for_query=True)
     if queries:
         return queries[:max_queries]
-    return DEFAULT_QUERIES[:max_queries]
+    return filter_research_terms(DEFAULT_QUERIES, for_query=True)[:max_queries]
 
 
 class CrossrefClient:
-    def __init__(self, timeout: int = 20, rows: int = 20, sleep_seconds: float = 0.15) -> None:
+    def __init__(self, timeout: int = 20, rows: int = 20, sleep_seconds: float = 0.15, max_retries: int = 3, retry_delay_seconds: int = 3) -> None:
         self.timeout = timeout
         self.rows = rows
         self.sleep_seconds = sleep_seconds
+        self.max_retries = max_retries
+        self.retry_delay_seconds = retry_delay_seconds
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "PaperRadar/2.0 (mailto:contact@example.com)"})
 
@@ -127,7 +141,14 @@ class CrossrefClient:
             "sort": "published",
             "order": "desc",
         }
-        response = self.session.get(CROSSREF_API, params=params, timeout=self.timeout)
+        response = retry_call(
+            lambda: self.session.get(CROSSREF_API, params=params, timeout=self.timeout),
+            source_type="crossref",
+            query=f"{journal.get('name')} | {query}",
+            timeout=self.timeout,
+            max_retries=self.max_retries,
+            retry_delay_seconds=self.retry_delay_seconds,
+        )
         response.raise_for_status()
         return response.json().get("message", {}).get("items", []) or []
 

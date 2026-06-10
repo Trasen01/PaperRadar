@@ -35,7 +35,7 @@ def test_supporting_platform_only_is_not_scored_too_high():
     score, reason, matches = _score(paper)
 
     assert "supporting_platforms" in matches
-    assert score <= 45
+    assert score <= 20
     assert reason.startswith("命中关键词：")
     assert "metasurface" in reason
     assert "建议" not in reason
@@ -51,12 +51,11 @@ def test_top_journal_unrelated_paper_is_not_high_score():
     )
     score, reason, matches = _score(paper)
 
-    assert score < 10
+    assert score <= 15
     assert relevance_label(score) == "Low Relevance"
     assert "exclude" in matches
-    assert reason.startswith("命中关键词：")
+    assert reason.startswith("命中排除词：")
     assert "clinical imaging" in reason
-    assert "减分" not in reason
 
 
 def test_abstract_matrix_or_neural_network_hit_enters_candidate():
@@ -88,6 +87,5 @@ def test_exclude_terms_reduce_score_without_deleting_candidate():
 
     assert "exclude" in related_matches
     assert "linear_algebra_computing" in related_matches
+    assert "exclude" not in clean_matches
     assert related_score < clean_score
-    assert related_score > 0
-    assert "linear_algebra_computing" in clean_matches

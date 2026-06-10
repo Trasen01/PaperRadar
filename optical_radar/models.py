@@ -31,6 +31,7 @@ class Paper:
     matched_fields: list[str] = field(default_factory=list)
     relevance_score: int = 0
     reason_zh: str = ""
+    score_breakdown: dict[str, int | bool] = field(default_factory=dict)
 
     @property
     def category_text(self) -> str:

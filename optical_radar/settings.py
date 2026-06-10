@@ -35,6 +35,12 @@ DEFAULT_SETTINGS = {
         "request_delay_seconds": 0.5,
         "cache_hours": 24,
     },
+    "network": {
+        "daily_timeout_seconds": 20,
+        "historical_timeout_seconds": 60,
+        "max_retries": 3,
+        "retry_delay_seconds": 3,
+    },
 }
 
 DEFAULT_SOURCES = {

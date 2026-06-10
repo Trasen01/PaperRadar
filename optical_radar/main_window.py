@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import traceback
@@ -151,7 +151,14 @@ def score_and_tag(papers: list[Paper], keyword_filter: KeywordFilter, keep_unmat
             paper.matched_keywords = []
             paper.matched_fields = []
             paper.relevance_score = 0
-            paper.reason_zh = "未命中当前关键词，仅作为来源存档。"
+            paper.reason_zh = "未命中当前研究关键词，仅作为来源存档。"
+            paper.score_breakdown = {
+                "keyword_score": 0,
+                "source_quality_score": 0,
+                "penalty_score": 0,
+                "final_score": 0,
+                "has_positive_keyword_hit": False,
+            }
             scored.append(paper)
             continue
         paper.matched_keywords = keyword_filter.flatten_matches(matches)
@@ -160,7 +167,6 @@ def score_and_tag(papers: list[Paper], keyword_filter: KeywordFilter, keep_unmat
         scored.append(paper)
     scored.sort(key=lambda item: (int(item.relevance_score), item.published_date or ""), reverse=True)
     return scored
-
 
 class DailyRadarWorker(QThread):
     finished_ok = Signal(list, dict)
@@ -182,24 +188,45 @@ class DailyRadarWorker(QThread):
         try:
             rows_per_query = int(self.settings.get("crossref", {}).get("rows_per_query", 20))
             max_queries = min(4, int(self.settings.get("crossref", {}).get("max_queries_per_run", 200)))
+            network = self.settings.get("network", {})
+            timeout = int(network.get("daily_timeout_seconds", 20))
+            max_retries = int(network.get("max_retries", 3))
+            retry_delay = int(network.get("retry_delay_seconds", 3))
             papers: list[Paper] = []
             stats = Counter()
             logger.info("DAILY_START days=%s sources=%s", self.days_back, self.sources)
 
             if self.sources.get("arxiv") and not self.cancel_requested:
-                arxiv_papers = ArxivClient().fetch_recent(self.days_back, 300)
-                stats["arxiv"] = len(arxiv_papers)
-                papers.extend(arxiv_papers)
+                try:
+                    arxiv_papers = ArxivClient(timeout=timeout, max_retries=max_retries, retry_delay_seconds=retry_delay).fetch_recent(self.days_back, 300)
+                    stats["arxiv"] = len(arxiv_papers)
+                    stats["success"] += 1
+                    papers.extend(arxiv_papers)
+                except Exception as exc:
+                    stats["failed"] += 1
+                    logger.warning("DAILY_SOURCE_FAILED source_type=arxiv error=%s", exc)
 
             if self.sources.get("rss") and not self.cancel_requested:
-                rss = JournalRssFetcher().fetch_recent(self.days_back)
-                stats["rss"] = len(rss.papers)
-                papers.extend(rss.papers)
+                try:
+                    rss = JournalRssFetcher(timeout=timeout, max_retries=max_retries, retry_delay_seconds=retry_delay).fetch_recent(self.days_back)
+                    stats["rss"] = len(rss.papers)
+                    stats["success"] += 1
+                    stats["failed"] += int(rss.stats.failed_sources)
+                    papers.extend(rss.papers)
+                except Exception as exc:
+                    stats["failed"] += 1
+                    logger.warning("DAILY_SOURCE_FAILED source_type=journal_rss error=%s", exc)
 
             if self.sources.get("crossref") and not self.cancel_requested:
-                crossref = CrossrefClient(rows=rows_per_query).fetch_recent(self.days_back, max_queries=max_queries)
-                stats["crossref"] = len(crossref.papers)
-                papers.extend(crossref.papers)
+                try:
+                    crossref = CrossrefClient(timeout=timeout, rows=rows_per_query, max_retries=max_retries, retry_delay_seconds=retry_delay).fetch_recent(self.days_back, max_queries=max_queries)
+                    stats["crossref"] = len(crossref.papers)
+                    stats["success"] += 1
+                    stats["failed"] += len(crossref.failed_requests)
+                    papers.extend(crossref.papers)
+                except Exception as exc:
+                    stats["failed"] += 1
+                    logger.warning("DAILY_SOURCE_FAILED source_type=crossref error=%s", exc)
 
             papers = dedupe_papers(papers)
             scored = score_and_tag(papers, self.keyword_filter, keep_unmatched=True)
@@ -254,6 +281,10 @@ class HistoricalSurveyWorker(QThread):
             max_queries = int(self.settings.get("crossref", {}).get("max_queries_per_run", 200))
             delay = float(self.settings.get("crossref", {}).get("request_delay_seconds", 0.5))
             cache_hours = int(self.settings.get("crossref", {}).get("cache_hours", 24))
+            network = self.settings.get("network", {})
+            timeout = int(network.get("historical_timeout_seconds", 60))
+            max_retries = int(network.get("max_retries", 3))
+            retry_delay = int(network.get("retry_delay_seconds", 3))
             queries = build_search_queries_from_keywords(load_keywords(), max_queries=max_queries)
             top_journals = [j for j in load_sources().get("top_journals", []) if j.get("crossref_enabled")]
             total_steps = (len(top_journals) * len(queries) if self.sources.get("crossref") else 0)
@@ -263,19 +294,42 @@ class HistoricalSurveyWorker(QThread):
                 total_steps += 1
             completed = 0
             logger.info("SURVEY_START name=%s from=%s until=%s total_steps=%s sources=%s", self.task_name, self.from_date, self.until_date, total_steps, self.sources)
+            logger.info("SURVEY_SEARCH_QUERIES queries=%s", queries)
+            if self.sources.get("arxiv"):
+                logger.info("SURVEY_ARXIV_NOTICE arXiv historical search may be slow; disable arXiv if only top-journal survey is needed.")
 
             if self.sources.get("arxiv") and not self.cancel_requested:
-                batch = ArxivClient().fetch_recent((self.until_date - self.from_date).days, 1000)
+                try:
+                    batch = ArxivClient(timeout=timeout, max_retries=max_retries, retry_delay_seconds=retry_delay).fetch_recent((self.until_date - self.from_date).days, 1000)
+                    stats["success"] += 1
+                except Exception as exc:
+                    batch = []
+                    stats["failed"] += 1
+                    stats["failed_query_count"] += 1
+                    if "timeout" in str(exc).lower() or "timed out" in str(exc).lower():
+                        stats["timeouts"] += 1
+                    logger.warning("SURVEY_SOURCE_FAILED source_type=arxiv query=arXiv timeout=%s error=%s suggestion=%s", timeout, exc, "如果 arXiv 经常超时，可在历史调研中暂时取消勾选 arXiv。")
                 completed += 1
                 self._handle_batch(batch, all_seen, stats, completed, total_steps, "arXiv", "arXiv")
 
             if self.sources.get("rss") and not self.cancel_requested:
-                rss = JournalRssFetcher().fetch_recent((self.until_date - self.from_date).days)
+                try:
+                    rss = JournalRssFetcher(timeout=timeout, max_retries=max_retries, retry_delay_seconds=retry_delay).fetch_recent((self.until_date - self.from_date).days)
+                    stats["success"] += 1
+                    stats["failed"] += int(rss.stats.failed_sources)
+                    stats["failed_query_count"] += int(rss.stats.failed_sources)
+                except Exception as exc:
+                    rss = type("EmptyRss", (), {"papers": []})()
+                    stats["failed"] += 1
+                    stats["failed_query_count"] += 1
+                    if "timeout" in str(exc).lower() or "timed out" in str(exc).lower():
+                        stats["timeouts"] += 1
+                    logger.warning("SURVEY_SOURCE_FAILED source_type=journal_rss query=RSS timeout=%s error=%s", timeout, exc)
                 completed += 1
                 self._handle_batch(rss.papers, all_seen, stats, completed, total_steps, "RSS 每日监控", "RSS")
 
             if self.sources.get("crossref"):
-                client = CrossrefClient(rows=rows_per_query, sleep_seconds=delay)
+                client = CrossrefClient(timeout=timeout, rows=rows_per_query, sleep_seconds=delay, max_retries=max_retries, retry_delay_seconds=retry_delay)
                 for journal in top_journals:
                     if self.cancel_requested:
                         break
@@ -300,15 +354,23 @@ class HistoricalSurveyWorker(QThread):
                             except Exception as exc:
                                 items = []
                                 stats["failed"] += 1
+                                stats["failed_query_count"] += 1
+                                if "timeout" in str(exc).lower() or "timed out" in str(exc).lower():
+                                    stats["timeouts"] += 1
                                 self.db.mark_query_cache(*cache_key, result_count=0, status=f"failed:{exc}")
-                                logger.warning("SURVEY_QUERY_FAILED journal=%s query=%s error=%s", journal.get("name"), query, exc)
+                                logger.warning("SURVEY_QUERY_FAILED source_type=crossref journal=%s query=%s timeout=%s error=%s", journal.get("name"), query, timeout, exc)
                         batch = [client._item_to_paper(journal, item) for item in items]
                         completed += 1
                         if cached:
                             stats["cached"] += 1
                         self._handle_batch(batch, all_seen, stats, completed, total_steps, str(journal.get("name")), query, cached=cached)
 
-            status = "stopped" if self.cancel_requested else "completed"
+            if self.cancel_requested:
+                status = "stopped"
+            elif stats["failed"]:
+                status = "partial_completed"
+            else:
+                status = "completed"
             stats["status"] = status
             logger.info("SURVEY_DONE status=%s stats=%s", status, dict(stats))
             self.finished_ok.emit(dict(stats))
@@ -339,6 +401,8 @@ class HistoricalSurveyWorker(QThread):
             "displayed": stats["displayed"],
             "success": stats["success"],
             "failed": stats["failed"],
+            "timeouts": stats["timeouts"],
+            "failed_query_count": stats["failed_query_count"],
             "cached": cached,
             "cancel_requested": self.cancel_requested,
         }
@@ -365,6 +429,7 @@ class MainWindow(QMainWindow):
         self.all_survey_papers: list[Paper] = []
         self.daily_papers: list[Paper] = []
         self.survey_papers: list[Paper] = []
+        self.last_survey_stats: dict[str, Any] = {}
         self.selected_paper: Paper | None = None
         self.cell_popup: QDialog | None = None
         self.cell_popup_key: tuple[int, int, int] | None = None
@@ -490,6 +555,7 @@ class MainWindow(QMainWindow):
         self.survey_crossref = QCheckBox("Crossref 顶刊历史检索")
         self.survey_crossref.setChecked(True)
         self.survey_arxiv = QCheckBox("arXiv")
+        self.survey_arxiv.setToolTip("arXiv 历史检索可能较慢，如仅需顶刊调研，可只选择 Crossref 顶刊历史检索。")
         self.survey_rss = QCheckBox("RSS 每日监控")
         self.survey_ignore_cache = QCheckBox("忽略缓存，重新检索")
         source_row.addWidget(self.survey_crossref)
@@ -515,7 +581,7 @@ class MainWindow(QMainWindow):
         progress_layout = QVBoxLayout(progress_box)
         self.survey_progress = QProgressBar()
         self.survey_status = QLabel("就绪")
-        self.survey_counts = QLabel("进度：0 / 0；已发现：0；去重后：0；命中：0；已显示：0；成功：0；失败：0")
+        self.survey_counts = QLabel("进度：0 / 0；已发现：0；去重后：0；命中：0；已显示：0；成功：0；失败：0；超时：0")
         progress_layout.addWidget(self.survey_progress)
         progress_layout.addWidget(self.survey_status)
         progress_layout.addWidget(self.survey_counts)
@@ -701,7 +767,10 @@ class MainWindow(QMainWindow):
         from_date, until_date = self._survey_dates()
         sources = {"crossref": self.survey_crossref.isChecked(), "arxiv": self.survey_arxiv.isChecked(), "rss": self.survey_rss.isChecked()}
         self.survey_progress.setValue(0)
-        self.survey_status.setText("正在启动")
+        if sources.get("arxiv"):
+            self.survey_status.setText("正在启动；arXiv 历史检索可能较慢，如仅需顶刊调研，可只选择 Crossref。")
+        else:
+            self.survey_status.setText("正在启动")
         self.survey_run_btn.setEnabled(False)
         self.survey_stop_btn.setEnabled(True)
         self.survey_worker = HistoricalSurveyWorker(
@@ -737,7 +806,7 @@ class MainWindow(QMainWindow):
         self.survey_counts.setText(
             f"进度：{completed} / {total}；已发现：{progress.get('found', 0)}；去重后：{progress.get('deduped', 0)}；"
             f"命中：{progress.get('matched', 0)}；已显示：{displayed_count}；"
-            f"成功：{progress.get('success', 0)}；失败：{progress.get('failed', 0)}"
+            f"成功：{progress.get('success', 0)}；失败：{progress.get('failed', 0)}；超时：{progress.get('timeouts', 0)}"
         )
 
     def refresh_daily_display(self) -> None:
@@ -759,7 +828,14 @@ class MainWindow(QMainWindow):
         self.populate_table(self.survey_table, self.survey_papers)
 
     def on_survey_finished(self, stats: dict) -> None:
-        self.survey_status.setText("已停止，本次已保存部分结果。" if stats.get("status") == "stopped" else "已完成")
+        self.last_survey_stats = dict(stats)
+        status = stats.get("status")
+        if status == "stopped":
+            self.survey_status.setText("已停止，本次已保存部分结果。")
+        elif status == "partial_completed":
+            self.survey_status.setText("部分完成，有失败；已保存成功获取的结果。")
+        else:
+            self.survey_status.setText("已完成")
         self.survey_run_btn.setEnabled(True)
         self.survey_stop_btn.setEnabled(False)
 
@@ -910,7 +986,7 @@ class MainWindow(QMainWindow):
 
     def generate_survey_report(self) -> None:
         from_date, until_date = self._survey_dates()
-        path = generate_survey_report(self.survey_papers, self.survey_name.text(), from_date, until_date)
+        path = generate_survey_report(self.survey_papers, self.survey_name.text(), from_date, until_date, run_stats=self.last_survey_stats)
         QMessageBox.information(self, "报告已生成", f"报告已保存到：\n{path}")
 
     def refresh_profile_page(self) -> None:
@@ -1160,3 +1236,4 @@ class MainWindow(QMainWindow):
         QLabel#cellPopupTitle { color: #1d4ed8; font-weight: 700; background: transparent; }
         QDialog#cellPopup QTextEdit { background: #f8fafc; border: 1px solid #dbe3ee; border-radius: 8px; padding: 10px; }
         """.replace("__CHECKMARK_PATH__", checkmark_path)
+

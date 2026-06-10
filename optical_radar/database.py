@@ -56,6 +56,7 @@ class PaperDatabase:
                     matched_fields TEXT,
                     relevance_score INTEGER,
                     reason_zh TEXT,
+                    score_breakdown TEXT,
                     first_seen_at TEXT,
                     last_seen_at TEXT
                 )
@@ -66,6 +67,7 @@ class PaperDatabase:
             self._ensure_column(conn, "source_type", "TEXT")
             self._ensure_column(conn, "source_quality_score", "INTEGER")
             self._ensure_column(conn, "matched_fields", "TEXT")
+            self._ensure_column(conn, "score_breakdown", "TEXT")
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_papers_arxiv_id ON papers(arxiv_id)")
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_papers_title_hash ON papers(title_hash)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_papers_url ON papers(url)")
@@ -120,7 +122,7 @@ class PaperDatabase:
                         SET title=?, authors=?, abstract=?, published_date=?, updated_date=?, url=?,
                             doi=?, journal_or_source=?, source_type=?, source_quality_score=?,
                             categories=?, primary_category=?, matched_keywords=?, matched_fields=?, relevance_score=?,
-                            reason_zh=?, last_seen_at=?
+                            reason_zh=?, score_breakdown=?, last_seen_at=?
                         WHERE id=?
                         """,
                         self._paper_values(paper) + (now, existing["id"]),
@@ -133,8 +135,8 @@ class PaperDatabase:
                             arxiv_id, title_hash, title, authors, abstract, published_date, updated_date,
                             url, doi, journal_or_source, source_type, source_quality_score,
                             categories, primary_category, matched_keywords, matched_fields, relevance_score,
-                            reason_zh, first_seen_at, last_seen_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            reason_zh, score_breakdown, first_seen_at, last_seen_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             paper.arxiv_id or None,
@@ -184,6 +186,7 @@ class PaperDatabase:
             json.dumps(paper.matched_fields, ensure_ascii=False),
             int(paper.relevance_score),
             paper.reason_zh,
+            json.dumps(paper.score_breakdown, ensure_ascii=False),
         )
 
     def load_papers(self, min_score: int = 0) -> list[Paper]:
@@ -266,4 +269,5 @@ class PaperDatabase:
             matched_fields=json.loads(row["matched_fields"] or "[]") if "matched_fields" in row.keys() else [],
             relevance_score=int(row["relevance_score"] or 0),
             reason_zh=row["reason_zh"] or "",
+            score_breakdown=json.loads(row["score_breakdown"] or "{}") if "score_breakdown" in row.keys() else {},
         )

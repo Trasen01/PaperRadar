@@ -18,3 +18,8 @@ crossref:
   max_queries_per_run: 200
   request_delay_seconds: 0.5
   cache_hours: 24
+network:
+  daily_timeout_seconds: 20
+  historical_timeout_seconds: 60
+  max_retries: 3
+  retry_delay_seconds: 3

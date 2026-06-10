@@ -96,9 +96,11 @@ def generate_survey_report(
     from_date: date,
     until_date: date,
     report_date: date | None = None,
+    run_stats: dict[str, int] | None = None,
 ) -> Path:
     ensure_directories()
     report_date = report_date or date.today()
+    run_stats = run_stats or {}
     path = REPORTS_DIR / f"{report_date.isoformat()}_literature_survey_report.md"
     high = [p for p in papers if p.relevance_score >= 60]
     possible = [p for p in papers if 40 <= p.relevance_score < 60]
@@ -114,6 +116,9 @@ def generate_survey_report(
         f"- 高相关数量: {len(high)}",
         f"- 可能相关数量: {len(possible)}",
         f"- 低相关数量: {len(low)}",
+        f"- 成功查询数: {int(run_stats.get('success', 0))}",
+        f"- 失败查询数: {int(run_stats.get('failed_query_count', run_stats.get('failed', 0)))}",
+        f"- 超时次数: {int(run_stats.get('timeouts', 0))}",
         "",
         "## 按期刊统计",
         "",

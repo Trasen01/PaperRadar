@@ -1,8 +1,10 @@
 ﻿from __future__ import annotations
 
 import logging
+import time
 import traceback
 from collections import Counter
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -38,6 +40,7 @@ from PySide6.QtWidgets import (
 )
 
 from .arxiv_client import ArxivClient
+from .cache_manager import cache_size_bytes, enforce_cache_limit
 from .crossref_client import CrossrefClient, build_search_queries_from_keywords
 from .database import PaperDatabase
 from .journal_fetcher import JournalRssFetcher
@@ -285,6 +288,12 @@ class HistoricalSurveyWorker(QThread):
             timeout = int(network.get("historical_timeout_seconds", 60))
             max_retries = int(network.get("max_retries", 3))
             retry_delay = int(network.get("retry_delay_seconds", 3))
+            performance = self.settings.get("performance", {})
+            max_workers = max(1, min(5, int(performance.get("max_workers", 3))))
+            batch_update_size = max(1, int(performance.get("batch_update_size", 10)))
+            cache_settings = self.settings.get("cache", {})
+            cache_enabled = bool(cache_settings.get("enabled", True))
+            cache_size = cache_size_bytes()
             queries = build_search_queries_from_keywords(load_keywords(), max_queries=max_queries)
             top_journals = [j for j in load_sources().get("top_journals", []) if j.get("crossref_enabled")]
             total_steps = (len(top_journals) * len(queries) if self.sources.get("crossref") else 0)
@@ -293,7 +302,24 @@ class HistoricalSurveyWorker(QThread):
             if self.sources.get("rss"):
                 total_steps += 1
             completed = 0
-            logger.info("SURVEY_START name=%s from=%s until=%s total_steps=%s sources=%s", self.task_name, self.from_date, self.until_date, total_steps, self.sources)
+            if total_steps > 200:
+                logger.warning("SURVEY_LARGE_TASK total_steps=%s message=%s", total_steps, "当前检索任务较大，可能耗时较长。建议减少 search_queries 或期刊数量。")
+            start_time = time.monotonic()
+            logger.info(
+                "SURVEY_START name=%s from=%s until=%s total_steps=%s sources=%s query_count=%s journal_count=%s max_workers=%s cache_hours=%s cache_dir=%s cache_size=%s cache_max_gb=%s",
+                self.task_name,
+                self.from_date,
+                self.until_date,
+                total_steps,
+                self.sources,
+                len(queries),
+                len(top_journals),
+                max_workers,
+                cache_hours,
+                cache_settings.get("cache_dir", "%APPDATA%/PaperRadar/cache"),
+                cache_size,
+                cache_settings.get("max_size_gb", 10),
+            )
             logger.info("SURVEY_SEARCH_QUERIES queries=%s", queries)
             if self.sources.get("arxiv"):
                 logger.info("SURVEY_ARXIV_NOTICE arXiv historical search may be slow; disable arXiv if only top-journal survey is needed.")
@@ -329,41 +355,72 @@ class HistoricalSurveyWorker(QThread):
                 self._handle_batch(rss.papers, all_seen, stats, completed, total_steps, "RSS 每日监控", "RSS")
 
             if self.sources.get("crossref"):
-                client = CrossrefClient(timeout=timeout, rows=rows_per_query, sleep_seconds=delay, max_retries=max_retries, retry_delay_seconds=retry_delay)
+                tasks: list[tuple[dict[str, Any], str, list[str]]] = []
                 for journal in top_journals:
-                    if self.cancel_requested:
-                        break
                     issns = journal.get("issn") or []
+                    if isinstance(issns, str):
+                        issns = [issns]
                     if not issns:
                         completed += len(queries)
                         stats["failed"] += len(queries)
+                        stats["failed_query_count"] += len(queries)
                         continue
                     for query in queries:
-                        if self.cancel_requested:
-                            break
-                        cache_key = ("crossref", str(journal.get("name")), query, self.from_date.isoformat(), self.until_date.isoformat())
-                        cached = False
-                        if not self.ignore_cache and self.db.is_query_cached(*cache_key, cache_hours=cache_hours):
-                            cached = True
-                            items: list[dict[str, Any]] = []
-                        else:
+                        tasks.append((journal, query, issns))
+
+                pending: dict[Future, tuple[dict[str, Any], str, tuple[str, str, str, str, str]]] = {}
+                task_index = 0
+                batch_papers: list[Paper] = []
+                batch_index = 0
+
+                def submit_next(executor: ThreadPoolExecutor) -> None:
+                    nonlocal task_index, completed, batch_index
+                    if self.cancel_requested or task_index >= len(tasks):
+                        return
+                    journal, query, issns = tasks[task_index]
+                    task_index += 1
+                    cache_key = ("crossref", str(journal.get("name")), query, self.from_date.isoformat(), self.until_date.isoformat())
+                    if not self.ignore_cache and cache_enabled and self.db.is_query_cached(*cache_key, cache_hours=cache_hours):
+                        completed += 1
+                        stats["cached"] += 1
+                        stats["cache_hit"] += 1
+                        logger.info("SURVEY_CACHE_HIT source_type=crossref journal=%s query=%s", journal.get("name"), query)
+                        self._handle_batch([], all_seen, stats, completed, total_steps, str(journal.get("name")), query, cached=True, batch_index=batch_index, started_at=start_time)
+                        batch_index += 1
+                        return
+                    stats["cache_miss"] += 1
+                    logger.info("SURVEY_CACHE_MISS source_type=crossref journal=%s query=%s", journal.get("name"), query)
+                    future = executor.submit(self._crossref_query_task, journal, issns, query, self.from_date, self.until_date, rows_per_query, timeout, delay, max_retries, retry_delay)
+                    pending[future] = (journal, query, cache_key)
+
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    while len(pending) < max_workers and task_index < len(tasks) and not self.cancel_requested:
+                        submit_next(executor)
+                    while pending:
+                        done, _ = wait(set(pending), return_when=FIRST_COMPLETED)
+                        for future in done:
+                            journal, query, cache_key = pending.pop(future)
+                            completed += 1
                             try:
-                                items = client._query(journal, issns, query, self.from_date, self.until_date)
-                                self.db.mark_query_cache(*cache_key, result_count=len(items), status="ok")
+                                batch, item_count = future.result()
+                                self.db.mark_query_cache(*cache_key, result_count=item_count, status="ok")
                                 stats["success"] += 1
+                                batch_papers.extend(batch)
                             except Exception as exc:
-                                items = []
                                 stats["failed"] += 1
                                 stats["failed_query_count"] += 1
                                 if "timeout" in str(exc).lower() or "timed out" in str(exc).lower():
                                     stats["timeouts"] += 1
                                 self.db.mark_query_cache(*cache_key, result_count=0, status=f"failed:{exc}")
                                 logger.warning("SURVEY_QUERY_FAILED source_type=crossref journal=%s query=%s timeout=%s error=%s", journal.get("name"), query, timeout, exc)
-                        batch = [client._item_to_paper(journal, item) for item in items]
-                        completed += 1
-                        if cached:
-                            stats["cached"] += 1
-                        self._handle_batch(batch, all_seen, stats, completed, total_steps, str(journal.get("name")), query, cached=cached)
+                            if len(batch_papers) >= batch_update_size or completed % batch_update_size == 0 or completed >= total_steps:
+                                self._handle_batch(batch_papers, all_seen, stats, completed, total_steps, str(journal.get("name")), query, cached=False, batch_index=batch_index, started_at=start_time)
+                                batch_index += 1
+                                batch_papers = []
+                            while len(pending) < max_workers and task_index < len(tasks) and not self.cancel_requested:
+                                submit_next(executor)
+                    if batch_papers:
+                        self._handle_batch(batch_papers, all_seen, stats, completed, total_steps, "Crossref", "batch", cached=False, batch_index=batch_index, started_at=start_time)
 
             if self.cancel_requested:
                 status = "stopped"
@@ -372,13 +429,36 @@ class HistoricalSurveyWorker(QThread):
             else:
                 status = "completed"
             stats["status"] = status
-            logger.info("SURVEY_DONE status=%s stats=%s", status, dict(stats))
+            try:
+                if cache_enabled:
+                    cleanup = enforce_cache_limit(float(cache_settings.get("max_size_gb", 10)))
+                    stats["cache_size_bytes"] = cleanup.size_after
+            except Exception:
+                logger.warning("SURVEY_CACHE_CLEANUP_FAILED", exc_info=True)
+            logger.info("SURVEY_DONE status=%s elapsed=%.1fs stats=%s", status, time.monotonic() - start_time, dict(stats))
             self.finished_ok.emit(dict(stats))
         except Exception as exc:
             logger.error("Survey failed: %s\n%s", exc, traceback.format_exc())
             self.failed.emit(str(exc))
 
-    def _handle_batch(self, batch: list[Paper], all_seen: list[Paper], stats: Counter, completed: int, total: int, journal: str, query: str, cached: bool = False) -> None:
+    def _crossref_query_task(
+        self,
+        journal: dict[str, Any],
+        issns: list[str],
+        query: str,
+        from_date: date,
+        until_date: date,
+        rows: int,
+        timeout: int,
+        delay: float,
+        max_retries: int,
+        retry_delay: int,
+    ) -> tuple[list[Paper], int]:
+        client = CrossrefClient(timeout=timeout, rows=rows, sleep_seconds=delay, max_retries=max_retries, retry_delay_seconds=retry_delay)
+        items = client._query(journal, issns, query, from_date, until_date)
+        return [client._item_to_paper(journal, item) for item in items], len(items)
+
+    def _handle_batch(self, batch: list[Paper], all_seen: list[Paper], stats: Counter, completed: int, total: int, journal: str, query: str, cached: bool = False, batch_index: int = 0, started_at: float | None = None) -> None:
         stats["requests"] = completed
         stats["found"] += len(batch)
         all_seen.extend(batch)
@@ -403,7 +483,11 @@ class HistoricalSurveyWorker(QThread):
             "failed": stats["failed"],
             "timeouts": stats["timeouts"],
             "failed_query_count": stats["failed_query_count"],
+            "cache_hit": stats["cache_hit"],
+            "cache_miss": stats["cache_miss"],
             "cached": cached,
+            "batch_index": batch_index,
+            "elapsed_seconds": round(time.monotonic() - started_at, 1) if started_at else 0,
             "cancel_requested": self.cancel_requested,
         }
         logger.info("SURVEY_BATCH %s", progress)
@@ -581,7 +665,7 @@ class MainWindow(QMainWindow):
         progress_layout = QVBoxLayout(progress_box)
         self.survey_progress = QProgressBar()
         self.survey_status = QLabel("就绪")
-        self.survey_counts = QLabel("进度：0 / 0；已发现：0；去重后：0；命中：0；已显示：0；成功：0；失败：0；超时：0")
+        self.survey_counts = QLabel("进度：0 / 0；已发现：0；去重后：0；命中：0；已显示：0；成功：0；失败：0；缓存：0；超时：0")
         progress_layout.addWidget(self.survey_progress)
         progress_layout.addWidget(self.survey_status)
         progress_layout.addWidget(self.survey_counts)
@@ -683,7 +767,7 @@ class MainWindow(QMainWindow):
         table.verticalHeader().setVisible(False)
         table.verticalHeader().setDefaultSectionSize(42)
         header = table.horizontalHeader()
-        header.setStretchLastSection(False)
+        header.setStretchLastSection(True)
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         table.setColumnWidth(0, 80)
         table.setColumnWidth(1, 150)
@@ -695,6 +779,7 @@ class MainWindow(QMainWindow):
         table.setColumnWidth(7, 220)
         table.setColumnWidth(8, 220)
         self._restore_table_widths(table, prefix)
+        self._fit_table_columns_to_viewport(table)
         header.sectionResized.connect(lambda *_: self._save_table_widths(table, prefix))
         splitter.addWidget(table)
         detail_widget = QWidget()
@@ -806,7 +891,7 @@ class MainWindow(QMainWindow):
         self.survey_counts.setText(
             f"进度：{completed} / {total}；已发现：{progress.get('found', 0)}；去重后：{progress.get('deduped', 0)}；"
             f"命中：{progress.get('matched', 0)}；已显示：{displayed_count}；"
-            f"成功：{progress.get('success', 0)}；失败：{progress.get('failed', 0)}；超时：{progress.get('timeouts', 0)}"
+            f"成功：{progress.get('success', 0)}；失败：{progress.get('failed', 0)}；缓存：{progress.get('cache_hit', progress.get('cached', 0))}；超时：{progress.get('timeouts', 0)}"
         )
 
     def refresh_daily_display(self) -> None:
@@ -916,6 +1001,31 @@ class MainWindow(QMainWindow):
                 table.setItem(row, col, item)
         table.setSortingEnabled(True)
         table.sortItems(0, Qt.SortOrder.DescendingOrder)
+        self._fit_table_columns_to_viewport(table)
+
+    def _fit_table_columns_to_viewport(self, table: QTableWidget) -> None:
+        viewport_width = max(table.viewport().width(), table.width() - 24)
+        if viewport_width <= 0 or table.columnCount() < 2:
+            return
+        link_col = table.columnCount() - 1
+        min_widths = [64, 92, 92, 150, 130, 96, 100, 140, 150]
+        widths = [
+            max(table.columnWidth(col), min_widths[col] if col < len(min_widths) else 80)
+            for col in range(table.columnCount())
+        ]
+        total = sum(widths)
+        if total <= viewport_width:
+            table.horizontalHeader().setStretchLastSection(True)
+            return
+        fixed_link = min(max(widths[link_col], 150), 220)
+        available = max(viewport_width - fixed_link, sum(min_widths[:link_col]))
+        current = sum(widths[:link_col])
+        scale = min(1.0, available / current) if current else 1.0
+        for col in range(link_col):
+            minimum = min_widths[col] if col < len(min_widths) else 80
+            table.setColumnWidth(col, max(minimum, int(widths[col] * scale)))
+        table.setColumnWidth(link_col, fixed_link)
+        table.horizontalHeader().setStretchLastSection(True)
 
     def on_table_cell_clicked(self, table: QTableWidget, row: int, col: int) -> None:
         item = table.item(row, col)
@@ -1236,4 +1346,5 @@ class MainWindow(QMainWindow):
         QLabel#cellPopupTitle { color: #1d4ed8; font-weight: 700; background: transparent; }
         QDialog#cellPopup QTextEdit { background: #f8fafc; border: 1px solid #dbe3ee; border-radius: 8px; padding: 10px; }
         """.replace("__CHECKMARK_PATH__", checkmark_path)
+
 

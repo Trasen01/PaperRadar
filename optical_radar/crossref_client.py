@@ -12,7 +12,7 @@ from .metadata_enricher import clean_abstract, enrich_paper_metadata
 from .models import Paper
 from .network import retry_call
 from .profile_manager import active_profile_search_queries
-from .profile_terms import filter_research_terms
+from .profile_terms import filter_research_terms, sanitize_search_queries
 from .settings import load_keywords, load_sources
 from .utils import normalize_space
 
@@ -61,20 +61,31 @@ class CrossrefResult:
 
 
 def build_search_queries_from_keywords(profile: dict[str, list[str]] | None = None, max_queries: int = 20) -> list[str]:
+    queries, removed = sanitize_search_queries(active_profile_search_queries(max_queries=max_queries * 2), max_queries=max_queries)
+    if queries:
+        logger.info(
+            "REMOTE_SEARCH_QUERIES source=active_profile raw_count=%s sanitized_count=%s removed=%s final=%s",
+            len(active_profile_search_queries(max_queries=max_queries * 2)),
+            len(queries),
+            removed,
+            queries,
+        )
+        return queries[:max_queries]
+
     fallback_terms: list[str] = []
     for group_name, group in (profile or {}).items():
         if str(group_name).lower() == "exclude":
             continue
         fallback_terms.extend(group or [])
-    if fallback_terms:
-        queries = filter_research_terms(fallback_terms, for_query=True)
-        if queries:
-            return queries[:max_queries]
-
-    queries = filter_research_terms(active_profile_search_queries(max_queries=max_queries), for_query=True)
-    if queries:
-        return queries[:max_queries]
-    return filter_research_terms(DEFAULT_QUERIES, for_query=True)[:max_queries]
+    fallback_terms = filter_research_terms(fallback_terms, for_query=True)[:10]
+    queries, removed = sanitize_search_queries(fallback_terms or DEFAULT_QUERIES, max_queries=min(max_queries, 10 if fallback_terms else max_queries))
+    logger.warning(
+        "REMOTE_SEARCH_QUERIES_FALLBACK sanitized_count=%s removed=%s final=%s",
+        len(queries),
+        removed,
+        queries,
+    )
+    return queries
 
 
 class CrossrefClient:

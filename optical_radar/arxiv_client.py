@@ -11,7 +11,7 @@ from dateutil import parser as date_parser
 from .models import Paper
 from .network import retry_call
 from .profile_manager import active_profile_search_queries
-from .profile_terms import filter_research_terms
+from .profile_terms import sanitize_search_queries
 from .utils import normalize_space
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,10 @@ class ArxivClient:
 
     def fetch_recent(self, days_back: int = 7, max_results: int = 100) -> list[Paper]:
         category_query = " OR ".join(f"cat:{cat}" for cat in DEFAULT_CATEGORIES)
-        terms = filter_research_terms(active_profile_search_queries(max_queries=20), for_query=True) or DEFAULT_QUERY_TERMS
+        terms, removed = sanitize_search_queries(active_profile_search_queries(max_queries=40), max_queries=20)
+        if removed:
+            logger.info("ARXIV_SEARCH_QUERY_FILTERED removed=%s final=%s", removed, terms)
+        terms = terms or DEFAULT_QUERY_TERMS
         term_query = " OR ".join(f'all:"{term}"' for term in terms)
         search_query = f"({category_query}) AND ({term_query})"
         params = {

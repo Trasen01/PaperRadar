@@ -81,9 +81,12 @@ class PaperDatabase:
                     query TEXT,
                     from_date TEXT,
                     until_date TEXT,
+                    cache_key TEXT,
                     last_run_at TEXT,
                     result_count INTEGER,
-                    status TEXT
+                    status TEXT,
+                    cached_result_path TEXT,
+                    error_message TEXT
                 )
                 """
             )
@@ -93,6 +96,14 @@ class PaperDatabase:
                 ON search_query_cache(source_type, journal_name, query, from_date, until_date)
                 """
             )
+            existing_cache_cols = {row["name"] for row in conn.execute("PRAGMA table_info(search_query_cache)").fetchall()}
+            for column, column_type in {
+                "cache_key": "TEXT",
+                "cached_result_path": "TEXT",
+                "error_message": "TEXT",
+            }.items():
+                if column not in existing_cache_cols:
+                    conn.execute(f"ALTER TABLE search_query_cache ADD COLUMN {column} {column_type}")
 
     def _ensure_column(self, conn: sqlite3.Connection, column: str, column_type: str) -> None:
         existing = {row["name"] for row in conn.execute("PRAGMA table_info(papers)").fetchall()}
@@ -238,16 +249,18 @@ class PaperDatabase:
         status: str,
     ) -> None:
         now = datetime.now().isoformat(timespec="seconds")
+        cache_key = "|".join([source_type, journal_name, query, from_date, until_date])
+        error_message = status if status != "ok" else ""
         with self.connect() as conn:
             conn.execute(
                 """
                 INSERT INTO search_query_cache (
-                    source_type, journal_name, query, from_date, until_date, last_run_at, result_count, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    source_type, journal_name, query, from_date, until_date, cache_key, last_run_at, result_count, status, error_message
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source_type, journal_name, query, from_date, until_date)
-                DO UPDATE SET last_run_at=excluded.last_run_at, result_count=excluded.result_count, status=excluded.status
+                DO UPDATE SET cache_key=excluded.cache_key, last_run_at=excluded.last_run_at, result_count=excluded.result_count, status=excluded.status, error_message=excluded.error_message
                 """,
-                (source_type, journal_name, query, from_date, until_date, now, int(result_count), status),
+                (source_type, journal_name, query, from_date, until_date, cache_key, now, int(result_count), status, error_message),
             )
 
     def _row_to_paper(self, row: sqlite3.Row) -> Paper:

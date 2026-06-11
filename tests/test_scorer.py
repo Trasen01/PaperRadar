@@ -37,7 +37,7 @@ def test_supporting_platform_only_is_not_scored_too_high():
     assert "supporting_platforms" in matches
     assert score <= 20
     assert reason.startswith("命中关键词：")
-    assert "metasurface" in reason
+    assert "MZI mesh" in reason
     assert "建议" not in reason
 
 

@@ -1,6 +1,7 @@
-profile_version: 1
+﻿profile_version: 1
 profile_id: optical_computing
 display_name: 光计算
+description: Optical and photonic computing, including optical neural networks, photonic processors, matrix multiplication, convolution, analog solvers, and neuromorphic photonics.
 description: Optical and photonic computing, including optical neural networks, photonic processors, matrix multiplication, convolution, analog solvers, and neuromorphic photonics.
 
 search_queries:
@@ -127,13 +128,10 @@ keyword_groups:
       - interferometer mesh
       - microring weight bank
       - microring resonator array
-      - silicon photonics
-      - integrated photonics
       - programmable photonics
       - diffractive optical element
       - spatial light modulator
       - SLM
-      - metasurface
       - optical frequency comb
       - wavelength division multiplexing
       - WDM

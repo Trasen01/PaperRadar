@@ -28,6 +28,7 @@ PROFILES_DIR = USER_DATA_DIR / "profiles"
 DATA_DIR = USER_DATA_DIR / "data"
 REPORTS_DIR = USER_DATA_DIR / "reports"
 LOGS_DIR = USER_DATA_DIR / "logs"
+CACHE_DIR = USER_DATA_DIR / "cache"
 ASSETS_DIR = RESOURCE_DIR / "assets"
 APP_ICON_PATH = ASSETS_DIR / "PaperRadar.png"
 APP_ICON_ICO_PATH = ASSETS_DIR / "PaperRadar.ico"
@@ -40,6 +41,7 @@ def ensure_directories() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def migrate_legacy_data_if_needed() -> None:

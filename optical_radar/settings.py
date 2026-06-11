@@ -41,6 +41,16 @@ DEFAULT_SETTINGS = {
         "max_retries": 3,
         "retry_delay_seconds": 3,
     },
+    "performance": {
+        "max_workers": 3,
+        "batch_update_size": 10,
+    },
+    "cache": {
+        "enabled": True,
+        "max_size_gb": 10,
+        "cleanup_policy": "lru",
+        "cache_dir": "%APPDATA%/PaperRadar/cache",
+    },
 }
 
 DEFAULT_SOURCES = {
@@ -279,13 +289,10 @@ DEFAULT_KEYWORDS = {
         "interferometer mesh",
         "microring weight bank",
         "microring resonator array",
-        "silicon photonics",
-        "integrated photonics",
         "programmable photonics",
         "diffractive optical element",
         "spatial light modulator",
         "SLM",
-        "metasurface",
         "optical frequency comb",
         "frequency comb",
         "wavelength division multiplexing",

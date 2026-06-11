@@ -39,6 +39,10 @@ BROAD_SINGLE_TERMS = {
     "photonic",
     "photonics",
     "optical",
+    "metasurface",
+    "metasurfaces",
+    "integrated photonics",
+    "silicon photonics",
 }
 
 
@@ -77,3 +81,33 @@ def filter_research_terms(terms: Iterable[str], *, for_query: bool = False) -> l
     if removed:
         logger.info("PROFILE_FILTERED_NON_RESEARCH_TERMS terms=%s", removed)
     return filtered
+
+
+def sanitize_search_queries(queries: Iterable[str], *, max_queries: int = 20) -> tuple[list[str], list[str]]:
+    raw_queries = [str(query or "").strip() for query in queries]
+    sanitized: list[str] = []
+    removed: list[str] = []
+    seen: set[str] = set()
+    for text in raw_queries:
+        key = normalize_term(text)
+        if not text or key in seen:
+            if text:
+                removed.append(text)
+            continue
+        if is_likely_journal_name(text) or is_too_broad_search_term(text):
+            removed.append(text)
+            continue
+        seen.add(key)
+        sanitized.append(text)
+    if len(sanitized) > max_queries:
+        removed.extend(sanitized[max_queries:])
+        sanitized = sanitized[:max_queries]
+    if removed:
+        logger.warning(
+            "SEARCH_QUERY_SANITIZED raw_count=%s filtered_count=%s removed=%s final=%s",
+            len(raw_queries),
+            len(sanitized),
+            removed,
+            sanitized,
+        )
+    return sanitized, removed

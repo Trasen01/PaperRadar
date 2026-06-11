@@ -23,3 +23,11 @@ network:
   historical_timeout_seconds: 60
   max_retries: 3
   retry_delay_seconds: 3
+performance:
+  max_workers: 3
+  batch_update_size: 10
+cache:
+  enabled: true
+  max_size_gb: 10
+  cleanup_policy: lru
+  cache_dir: "%APPDATA%/PaperRadar/cache"

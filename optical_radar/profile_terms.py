@@ -39,10 +39,6 @@ BROAD_SINGLE_TERMS = {
     "photonic",
     "photonics",
     "optical",
-    "metasurface",
-    "metasurfaces",
-    "integrated photonics",
-    "silicon photonics",
 }
 
 

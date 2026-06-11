@@ -22,10 +22,16 @@ def test_sanitize_search_queries_filters_journals_and_broad_terms():
         ],
         max_queries=20,
     )
-    assert queries == ["thin-film lithium niobate modulator"]
+    assert queries == [
+        "integrated photonics",
+        "silicon photonics",
+        "metasurface",
+        "thin-film lithium niobate modulator",
+    ]
     assert "Nature" in removed
-    assert "integrated photonics" in removed
-    assert "metasurface" in removed
+    assert "Science" in removed
+    assert "Optica" in removed
+    assert "Light" in removed
 
 
 def test_remote_queries_use_active_profile_search_queries_not_keyword_groups(monkeypatch):

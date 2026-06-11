@@ -972,7 +972,7 @@ class MainWindow(QMainWindow):
                 format_date_only(paper.published_date),
                 paper.doi or paper.primary_category_text or "期刊论文",
                 paper.matched_keywords_text,
-                "打开链接" if paper.url else "无链接",
+                paper.url or "无链接",
             ]
             for col, value in enumerate(values):
                 sort_value: Any = value
@@ -1006,29 +1006,26 @@ class MainWindow(QMainWindow):
 
     def _apply_result_column_layout(self, table: QTableWidget) -> None:
         header = table.horizontalHeader()
-        header.setStretchLastSection(False)
+        header.setStretchLastSection(True)
+        header.setCascadingSectionResizes(True)
+        header.setMinimumSectionSize(70)
         table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         for col in range(table.columnCount()):
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
-        fixed_widths = {
+        default_widths = {
             0: 70,
-            2: 110,
-            5: 110,
-            RESULT_LINK_COLUMN: 260,
-        }
-        interactive_widths = {
             1: 140,
+            2: 110,
+            3: 280,
             4: 220,
+            5: 110,
             6: 160,
             7: 220,
+            RESULT_LINK_COLUMN: 300,
         }
-        for col, width in fixed_widths.items():
-            header.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
-            table.setColumnWidth(col, width)
-        for col, width in interactive_widths.items():
+        for col, width in default_widths.items():
             if table.columnWidth(col) < 80:
                 table.setColumnWidth(col, width)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
 
     def _is_result_table(self, table: QTableWidget) -> bool:
         return table is self.daily_table or table is self.survey_table

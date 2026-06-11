@@ -8,6 +8,7 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 from PySide6.QtCore import QDate, QSettings, QThread, Signal, Qt
@@ -65,6 +66,8 @@ from .tray import RadarTrayIcon
 from .utils import APP_ICON_PATH, REPORTS_DIR, format_date_only, open_folder, open_url, title_hash
 
 logger = logging.getLogger(__name__)
+RESULT_LINK_COLUMN = 8
+LINK_URL_ROLE = Qt.ItemDataRole.UserRole.value + 1
 
 
 class SortableTableItem(QTableWidgetItem):
@@ -596,7 +599,6 @@ class MainWindow(QMainWindow):
         self.daily_stop_btn.clicked.connect(self.stop_daily)
         self.daily_report_btn.clicked.connect(self.generate_daily_report)
         self.daily_open_reports_btn.clicked.connect(self.open_report_folder)
-        self.daily_table.itemSelectionChanged.connect(lambda: self.on_selection_changed(self.daily_table, self.daily_papers))
         self.daily_table.cellClicked.connect(lambda row, col: self.on_table_cell_clicked(self.daily_table, row, col))
         self.daily_min_score.valueChanged.connect(lambda _: self.refresh_daily_display())
         return page
@@ -680,7 +682,6 @@ class MainWindow(QMainWindow):
         self.survey_open_reports_btn.clicked.connect(self.open_report_folder)
         self.survey_range.currentTextChanged.connect(self._sync_survey_date_controls)
         self._sync_survey_date_controls()
-        self.survey_table.itemSelectionChanged.connect(lambda: self.on_selection_changed(self.survey_table, self.survey_papers))
         self.survey_table.cellClicked.connect(lambda row, col: self.on_table_cell_clicked(self.survey_table, row, col))
         self.survey_min_score.valueChanged.connect(lambda _: self.refresh_survey_display())
         return page
@@ -764,23 +765,18 @@ class MainWindow(QMainWindow):
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         table.setAlternatingRowColors(True)
+        table.setWordWrap(False)
+        table.setMouseTracking(True)
         table.verticalHeader().setVisible(False)
         table.verticalHeader().setDefaultSectionSize(42)
         header = table.horizontalHeader()
-        header.setStretchLastSection(True)
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        table.setColumnWidth(0, 80)
-        table.setColumnWidth(1, 150)
-        table.setColumnWidth(2, 110)
-        table.setColumnWidth(3, 280)
-        table.setColumnWidth(4, 220)
-        table.setColumnWidth(5, 110)
-        table.setColumnWidth(6, 120)
-        table.setColumnWidth(7, 220)
-        table.setColumnWidth(8, 220)
+        header.setStretchLastSection(False)
+        header.setMinimumSectionSize(60)
+        self._apply_result_column_layout(table)
         self._restore_table_widths(table, prefix)
-        self._fit_table_columns_to_viewport(table)
+        self._apply_result_column_layout(table)
         header.sectionResized.connect(lambda *_: self._save_table_widths(table, prefix))
+        table.cellEntered.connect(lambda row, col, t=table: self.on_result_cell_entered(t, row, col))
         splitter.addWidget(table)
         detail_widget = QWidget()
         detail_widget.setObjectName("paperCard")
@@ -976,7 +972,7 @@ class MainWindow(QMainWindow):
                 format_date_only(paper.published_date),
                 paper.doi or paper.primary_category_text or "期刊论文",
                 paper.matched_keywords_text,
-                paper.url,
+                "打开链接" if paper.url else "无链接",
             ]
             for col, value in enumerate(values):
                 sort_value: Any = value
@@ -992,45 +988,74 @@ class MainWindow(QMainWindow):
                     if paper.relevance_score >= 80:
                         item.setForeground(QBrush(QColor("#1d4ed8")))
                         item.setBackground(QBrush(QColor("#eaf2ff")))
-                if col == 8 and paper.url:
-                    font = QFont(item.font())
-                    font.setUnderline(True)
-                    item.setFont(font)
-                    item.setForeground(QBrush(QColor("#2563eb")))
-                    item.setToolTip("点击打开链接")
+                if col == RESULT_LINK_COLUMN:
+                    item.setData(LINK_URL_ROLE, paper.url)
+                    if paper.url:
+                        font = QFont(item.font())
+                        font.setUnderline(True)
+                        item.setFont(font)
+                        item.setForeground(QBrush(QColor("#2563eb")))
+                        item.setToolTip(paper.url)
+                    else:
+                        item.setForeground(QBrush(QColor("#94a3b8")))
+                        item.setToolTip("该论文没有可用链接")
                 table.setItem(row, col, item)
         table.setSortingEnabled(True)
         table.sortItems(0, Qt.SortOrder.DescendingOrder)
-        self._fit_table_columns_to_viewport(table)
+        self._apply_result_column_layout(table)
 
-    def _fit_table_columns_to_viewport(self, table: QTableWidget) -> None:
-        viewport_width = max(table.viewport().width(), table.width() - 24)
-        if viewport_width <= 0 or table.columnCount() < 2:
-            return
-        link_col = table.columnCount() - 1
-        min_widths = [64, 92, 92, 150, 130, 96, 100, 140, 150]
-        widths = [
-            max(table.columnWidth(col), min_widths[col] if col < len(min_widths) else 80)
-            for col in range(table.columnCount())
-        ]
-        total = sum(widths)
-        if total <= viewport_width:
-            table.horizontalHeader().setStretchLastSection(True)
-            return
-        fixed_link = min(max(widths[link_col], 150), 220)
-        available = max(viewport_width - fixed_link, sum(min_widths[:link_col]))
-        current = sum(widths[:link_col])
-        scale = min(1.0, available / current) if current else 1.0
-        for col in range(link_col):
-            minimum = min_widths[col] if col < len(min_widths) else 80
-            table.setColumnWidth(col, max(minimum, int(widths[col] * scale)))
-        table.setColumnWidth(link_col, fixed_link)
-        table.horizontalHeader().setStretchLastSection(True)
+    def _apply_result_column_layout(self, table: QTableWidget) -> None:
+        header = table.horizontalHeader()
+        header.setStretchLastSection(False)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        for col in range(table.columnCount()):
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+        fixed_widths = {
+            0: 70,
+            2: 110,
+            5: 110,
+            RESULT_LINK_COLUMN: 260,
+        }
+        interactive_widths = {
+            1: 140,
+            4: 220,
+            6: 160,
+            7: 220,
+        }
+        for col, width in fixed_widths.items():
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            table.setColumnWidth(col, width)
+        for col, width in interactive_widths.items():
+            if table.columnWidth(col) < 80:
+                table.setColumnWidth(col, width)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+
+    def _is_result_table(self, table: QTableWidget) -> bool:
+        return table is self.daily_table or table is self.survey_table
+
+    def _papers_for_table(self, table: QTableWidget) -> list[Paper]:
+        if table is self.daily_table:
+            return self.daily_papers
+        if table is self.survey_table:
+            return self.survey_papers
+        return []
+
+    def on_result_cell_entered(self, table: QTableWidget, row: int, col: int) -> None:
+        item = table.item(row, col)
+        if col == RESULT_LINK_COLUMN and item and item.data(LINK_URL_ROLE):
+            table.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            table.viewport().unsetCursor()
 
     def on_table_cell_clicked(self, table: QTableWidget, row: int, col: int) -> None:
         item = table.item(row, col)
         if not item:
             return
+        if self._is_result_table(table):
+            if col == RESULT_LINK_COLUMN:
+                self._open_link_from_table_item(table, row, col)
+                return
+            self._select_result_table_row(table, row)
         text = item.text()
         if not text:
             return
@@ -1060,6 +1085,32 @@ class MainWindow(QMainWindow):
         pos = table.viewport().mapToGlobal(table.visualItemRect(item).bottomLeft())
         self.cell_popup.move(pos)
         self.cell_popup.show()
+
+    def _select_result_table_row(self, table: QTableWidget, row: int) -> None:
+        papers = self._papers_for_table(table)
+        item = table.item(row, 0)
+        if not item:
+            return
+        row_index = item.data(Qt.ItemDataRole.UserRole)
+        if row_index is None or row_index >= len(papers):
+            return
+        self.selected_paper = papers[row_index]
+        target = "daily" if table is self.daily_table else "survey"
+        self._show_detail(self.selected_paper, target)
+
+    def _open_link_from_table_item(self, table: QTableWidget, row: int, col: int) -> None:
+        item = table.item(row, col)
+        url = item.data(LINK_URL_ROLE) if item else ""
+        table.clearSelection()
+        if not url:
+            self.statusBar().showMessage("该论文没有可用链接", 3000)
+            return
+        parsed = urlparse(str(url))
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            self.statusBar().showMessage("链接无效", 3000)
+            return
+        open_url(str(url))
+        self.statusBar().showMessage("正在打开链接", 2000)
 
     def on_selection_changed(self, table: QTableWidget, papers: list[Paper]) -> None:
         items = table.selectedItems()

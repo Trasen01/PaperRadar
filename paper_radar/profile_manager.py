@@ -38,9 +38,16 @@ def default_profile_user_path() -> Path:
     return PROFILES_DIR / "optical_computing.yaml"
 
 
-def ensure_default_profile_available() -> Path:
+def ensure_default_profile_available(force: bool = False) -> Path:
     ensure_directories()
     target = default_profile_user_path()
+    if not force:
+        try:
+            settings = load_settings()
+            if settings.get("default_profile_deleted") and not target.exists():
+                return target
+        except Exception:
+            pass
     if not target.exists():
         source = default_profile_resource_path()
         if source.exists():
@@ -52,7 +59,6 @@ def ensure_default_profile_available() -> Path:
 
 def initialize_profile_system() -> bool:
     ensure_directories()
-    ensure_default_profile_available()
     settings_path = CONFIG_DIR / "settings.yaml"
     settings_existed = settings_path.exists()
     raw_active_profile = None
@@ -64,12 +70,18 @@ def initialize_profile_system() -> bool:
         except Exception:
             raw_active_profile = None
     settings = load_settings()
+    if not settings.get("default_profile_deleted"):
+        ensure_default_profile_available()
     first_run_needed = not settings_existed or not raw_active_profile
-    settings.setdefault("active_profile", DEFAULT_PROFILE_ID)
+    settings.setdefault("active_profile", DEFAULT_PROFILE_ID if not settings.get("default_profile_deleted") else "")
+    settings.setdefault("default_profile_deleted", False)
     settings.setdefault("first_run_completed", False)
     settings["app_version"] = APP_VERSION
     save_settings(settings)
-    return first_run_needed or not get_profile_path(str(settings.get("active_profile", DEFAULT_PROFILE_ID))).exists()
+    active_profile = str(settings.get("active_profile") or "")
+    if not active_profile:
+        return True
+    return first_run_needed or not get_profile_path(active_profile).exists()
 
 
 def get_profile_path(profile_id: str) -> Path:
@@ -77,7 +89,7 @@ def get_profile_path(profile_id: str) -> Path:
 
 
 def load_all_profiles() -> list[dict[str, Any]]:
-    ensure_default_profile_available()
+    ensure_directories()
     profiles: list[dict[str, Any]] = []
     for path in sorted(PROFILES_DIR.glob("*.yaml")):
         try:
@@ -92,11 +104,24 @@ def load_all_profiles() -> list[dict[str, Any]]:
 
 def load_active_profile() -> dict[str, Any]:
     settings = load_settings()
-    profile_id = settings.get("active_profile") or DEFAULT_PROFILE_ID
+    profile_id = settings.get("active_profile") or ""
+    if not profile_id:
+        profiles = load_all_profiles()
+        if not profiles:
+            return {}
+        profile_id = str(profiles[0].get("profile_id") or "")
+        settings["active_profile"] = profile_id
+        save_settings(settings)
     path = get_profile_path(str(profile_id))
     if not path.exists():
-        path = ensure_default_profile_available()
-        settings["active_profile"] = DEFAULT_PROFILE_ID
+        profiles = load_all_profiles()
+        if not profiles:
+            settings["active_profile"] = ""
+            save_settings(settings)
+            return {}
+        profile_id = str(profiles[0].get("profile_id") or "")
+        path = get_profile_path(profile_id)
+        settings["active_profile"] = profile_id
         save_settings(settings)
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -105,15 +130,14 @@ def load_active_profile() -> dict[str, Any]:
             return data
     except Exception:
         pass
-    fallback_path = default_profile_resource_path()
-    fallback = yaml.safe_load(fallback_path.read_text(encoding="utf-8")) if fallback_path.exists() else _fallback_default_profile()
-    fallback["_path"] = str(fallback_path)
-    return fallback
+    return {}
 
 
 def set_active_profile(profile_id: str) -> None:
     settings = load_settings()
     settings["active_profile"] = profile_id
+    if profile_id == DEFAULT_PROFILE_ID:
+        settings["default_profile_deleted"] = False
     settings["first_run_completed"] = True
     settings["app_version"] = APP_VERSION
     save_settings(settings)
@@ -438,14 +462,23 @@ def save_profile(profile: dict[str, Any]) -> Path:
 
 
 def delete_profile(profile_id: str) -> None:
-    if profile_id == DEFAULT_PROFILE_ID:
-        return
     path = get_profile_path(profile_id)
     if path.exists():
         path.unlink()
     settings = load_settings()
+    if profile_id == DEFAULT_PROFILE_ID:
+        settings["default_profile_deleted"] = True
     if settings.get("active_profile") == profile_id:
-        set_active_profile(DEFAULT_PROFILE_ID)
+        remaining = load_all_profiles()
+        if remaining:
+            settings["active_profile"] = str(remaining[0].get("profile_id") or "")
+        else:
+            settings["active_profile"] = ""
+            settings["first_run_completed"] = False
+        settings["app_version"] = APP_VERSION
+        save_settings(settings)
+    else:
+        save_settings(settings)
 
 
 def make_profile_id(value: str) -> str:

@@ -1,6 +1,6 @@
-from optical_radar.keyword_filter import KeywordFilter
-from optical_radar.models import Paper
-from optical_radar.settings import DEFAULT_KEYWORDS
+﻿from paper_radar.keyword_filter import KeywordFilter
+from paper_radar.models import Paper
+from paper_radar.settings import DEFAULT_KEYWORDS
 
 
 def test_keyword_filter_matches_phrases_case_insensitive():

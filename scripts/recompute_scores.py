@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import sys
 from pathlib import Path
@@ -7,10 +7,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from optical_radar.database import PaperDatabase
-from optical_radar.keyword_filter import KeywordFilter
-from optical_radar.main_window import score_and_tag
-from optical_radar.settings import load_keywords
+from paper_radar.database import PaperDatabase
+from paper_radar.keyword_filter import KeywordFilter
+from paper_radar.main_window import score_and_tag
+from paper_radar.settings import load_keywords
 
 
 def main() -> int:

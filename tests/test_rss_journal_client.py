@@ -1,11 +1,11 @@
-from pathlib import Path
+﻿from pathlib import Path
 
-from optical_radar.database import PaperDatabase
-from optical_radar.journal_fetcher import JournalRssFetcher
-from optical_radar.keyword_filter import KeywordFilter
-from optical_radar.scorer import score_paper
-from optical_radar.settings import DEFAULT_KEYWORDS
-from optical_radar.utils import format_date_only
+from paper_radar.database import PaperDatabase
+from paper_radar.journal_fetcher import JournalRssFetcher
+from paper_radar.keyword_filter import KeywordFilter
+from paper_radar.scorer import score_paper
+from paper_radar.settings import DEFAULT_KEYWORDS
+from paper_radar.utils import format_date_only
 
 
 def test_sample_journal_feed_runs_without_arxiv_id(tmp_path: Path):

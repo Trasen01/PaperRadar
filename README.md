@@ -1,8 +1,8 @@
-# PaperRadar
+﻿# PaperRadar
 
 PaperRadar is a lightweight Windows desktop literature radar for researchers. It helps you monitor new papers every day, run historical literature surveys before starting a project, manage research-direction Profiles, score relevance locally, store papers in SQLite, and generate Markdown reports.
 
-The current desktop application is built with Python and PySide6. The internal Python package is still named `optical_radar` for compatibility, but the product and repository name are **PaperRadar**.
+The current desktop application is built with Python and PySide6. The main Python package is `paper_radar`, and the product and repository name are **PaperRadar**.
 
 ## What PaperRadar Does
 
@@ -34,7 +34,7 @@ docs/images/
 Download and run the Windows installer:
 
 ```text
-PaperRadar_Setup_v0.2.0.exe
+PaperRadar_Setup_v0.2.1.exe
 ```
 
 The installer supports:
@@ -175,7 +175,7 @@ Install Inno Setup 6, then run:
 Output:
 
 ```text
-dist\installer\PaperRadar_Setup_v0.2.0.exe
+dist\installer\PaperRadar_Setup_v0.2.1.exe
 ```
 
 The installer is generated from:
@@ -192,7 +192,7 @@ PaperRadar/
   LICENSE
   requirements.txt
   run.py
-  optical_radar/
+  paper_radar/
   resources/
     default_profiles/
   config_templates/

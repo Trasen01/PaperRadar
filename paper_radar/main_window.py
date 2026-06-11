@@ -176,6 +176,8 @@ def score_and_tag(papers: list[Paper], keyword_filter: KeywordFilter, keep_unmat
     return scored
 
 class DailyRadarWorker(QThread):
+    batch_results_ready = Signal(list, dict)
+    progress_updated = Signal(dict)
     finished_ok = Signal(list, dict)
     failed = Signal(str)
 
@@ -201,17 +203,32 @@ class DailyRadarWorker(QThread):
             retry_delay = int(network.get("retry_delay_seconds", 3))
             papers: list[Paper] = []
             stats = Counter()
+            total_steps = sum(1 for key in ("arxiv", "rss", "crossref") if self.sources.get(key))
+            completed = 0
             logger.info("DAILY_START days=%s sources=%s", self.days_back, self.sources)
+            self.progress_updated.emit({
+                "completed": 0,
+                "total": max(total_steps, 1),
+                "source": "准备检索",
+                "found": 0,
+                "deduped": 0,
+                "matched": 0,
+                "displayed": 0,
+                "success": 0,
+                "failed": 0,
+            })
 
             if self.sources.get("arxiv") and not self.cancel_requested:
                 try:
                     arxiv_papers = ArxivClient(timeout=timeout, max_retries=max_retries, retry_delay_seconds=retry_delay).fetch_recent(self.days_back, 300)
                     stats["arxiv"] = len(arxiv_papers)
                     stats["success"] += 1
-                    papers.extend(arxiv_papers)
                 except Exception as exc:
                     stats["failed"] += 1
                     logger.warning("DAILY_SOURCE_FAILED source_type=arxiv error=%s", exc)
+                    arxiv_papers = []
+                completed += 1
+                self._handle_daily_batch(arxiv_papers, papers, stats, completed, total_steps, "预印本（arXiv）")
 
             if self.sources.get("rss") and not self.cancel_requested:
                 try:
@@ -219,10 +236,12 @@ class DailyRadarWorker(QThread):
                     stats["rss"] = len(rss.papers)
                     stats["success"] += 1
                     stats["failed"] += int(rss.stats.failed_sources)
-                    papers.extend(rss.papers)
                 except Exception as exc:
                     stats["failed"] += 1
                     logger.warning("DAILY_SOURCE_FAILED source_type=journal_rss error=%s", exc)
+                    rss = type("EmptyRss", (), {"papers": []})()
+                completed += 1
+                self._handle_daily_batch(rss.papers, papers, stats, completed, total_steps, "顶级期刊最新文章")
 
             if self.sources.get("crossref") and not self.cancel_requested:
                 try:
@@ -230,10 +249,12 @@ class DailyRadarWorker(QThread):
                     stats["crossref"] = len(crossref.papers)
                     stats["success"] += 1
                     stats["failed"] += len(crossref.failed_requests)
-                    papers.extend(crossref.papers)
                 except Exception as exc:
                     stats["failed"] += 1
                     logger.warning("DAILY_SOURCE_FAILED source_type=crossref error=%s", exc)
+                    crossref = type("EmptyCrossref", (), {"papers": [], "failed_requests": []})()
+                completed += 1
+                self._handle_daily_batch(crossref.papers, papers, stats, completed, total_steps, "顶级期刊近期检索")
 
             papers = dedupe_papers(papers)
             scored = score_and_tag(papers, self.keyword_filter, keep_unmatched=True)
@@ -249,6 +270,45 @@ class DailyRadarWorker(QThread):
         except Exception as exc:
             logger.error("Daily radar failed: %s\n%s", exc, traceback.format_exc())
             self.failed.emit(str(exc))
+
+    def _handle_daily_batch(
+        self,
+        batch: list[Paper],
+        all_seen: list[Paper],
+        stats: Counter,
+        completed: int,
+        total: int,
+        source_label: str,
+    ) -> None:
+        all_seen.extend(batch)
+        deduped = dedupe_papers(all_seen)
+        scored = score_and_tag(deduped, self.keyword_filter, keep_unmatched=True)
+        storage = self.db.upsert_papers_with_stats(scored)
+        stats["deduped"] = len(scored)
+        stats["matched"] = sum(1 for paper in scored if paper.matched_keywords)
+        stats["displayed"] = len(scored)
+        stats["inserted"] += storage.inserted_count
+        stats["updated"] += storage.updated_count
+        stats["high"] = sum(1 for paper in scored if paper.relevance_score >= 60)
+        stats["skim"] = sum(1 for paper in scored if 40 <= paper.relevance_score < 60)
+        progress = {
+            "completed": completed,
+            "total": max(total, 1),
+            "source": source_label,
+            "found": len(all_seen),
+            "deduped": stats["deduped"],
+            "matched": stats["matched"],
+            "displayed": stats["displayed"],
+            "success": stats["success"],
+            "failed": stats["failed"],
+            "inserted": stats["inserted"],
+            "updated": stats["updated"],
+            "high": stats["high"],
+            "skim": stats["skim"],
+        }
+        logger.info("DAILY_BATCH %s", progress)
+        self.batch_results_ready.emit(scored, progress)
+        self.progress_updated.emit(progress)
 
 
 class HistoricalSurveyWorker(QThread):
@@ -567,6 +627,21 @@ class MainWindow(QMainWindow):
     def _style_button(self, button: QPushButton, kind: str = "secondary") -> None:
         button.setObjectName(f"{kind}Button")
 
+    def _require_active_profile(self) -> bool:
+        profile = load_active_profile()
+        profile_id = str(profile.get("profile_id") or "").strip()
+        has_keywords = bool(profile_to_keywords(profile))
+        has_queries = bool(profile.get("search_queries"))
+        if profile_id and (has_keywords or has_queries):
+            return True
+        QMessageBox.information(
+            self,
+            "请先配置研究方向",
+            "当前没有可用的研究方向 Profile。\n\n请先进入“研究方向配置”，导入或创建一个研究方向，然后再开始每日雷达或历史调研。",
+        )
+        self.tabs.setCurrentIndex(2)
+        return False
+
     def _build_daily_tab(self) -> QWidget:
         page = QWidget()
         root = QVBoxLayout(page)
@@ -632,8 +707,20 @@ class MainWindow(QMainWindow):
         actions.addStretch(1)
         root.addLayout(actions)
 
+        progress_box = QGroupBox("进度")
+        progress_layout = QVBoxLayout(progress_box)
+        progress_layout.setContentsMargins(14, 18, 14, 14)
+        progress_layout.setSpacing(8)
+        self.daily_progress = QProgressBar()
+        self.daily_progress.setValue(0)
+        self.daily_progress_text = QLabel("就绪")
+        self.daily_progress_text.setObjectName("progressCounts")
+        progress_layout.addWidget(self.daily_progress)
+        progress_layout.addWidget(self.daily_progress_text)
+        root.addWidget(progress_box)
+
         self.daily_table, self.daily_detail, self.daily_open_link_btn = self._make_results_area()
-        root.addWidget(self.daily_table_splitter)
+        root.addWidget(self.daily_table_splitter, 1)
 
         self.daily_run_btn.clicked.connect(self.run_daily)
         self.daily_stop_btn.clicked.connect(self.stop_daily)
@@ -642,6 +729,7 @@ class MainWindow(QMainWindow):
         self.daily_scope_btn.clicked.connect(lambda: self.show_search_scope("daily"))
         self.daily_table.cellClicked.connect(lambda row, col: self.on_table_cell_clicked(self.daily_table, row, col))
         self.daily_min_score.valueChanged.connect(lambda _: self.refresh_daily_display())
+
         return page
 
     def _build_survey_tab(self) -> QWidget:
@@ -729,7 +817,7 @@ class MainWindow(QMainWindow):
         root.addWidget(progress_box)
 
         self.survey_table, self.survey_detail, self.survey_open_link_btn = self._make_results_area(prefix="survey")
-        root.addWidget(self.survey_table_splitter)
+        root.addWidget(self.survey_table_splitter, 1)
 
         self.survey_run_btn.clicked.connect(self.run_survey)
         self.survey_stop_btn.clicked.connect(self.stop_survey)
@@ -870,13 +958,16 @@ class MainWindow(QMainWindow):
         meta.setWordWrap(True)
         text = QTextEdit()
         text.setReadOnly(True)
+        text.setMinimumHeight(90)
         open_btn = QPushButton("打开链接")
         open_btn.setEnabled(False)
         detail_layout.addWidget(title)
         detail_layout.addWidget(meta)
         detail_layout.addWidget(text)
         splitter.addWidget(detail_widget)
-        splitter.setSizes([430, 260])
+        splitter.setSizes([680, 170])
+        splitter.setStretchFactor(0, 4)
+        splitter.setStretchFactor(1, 1)
         if prefix == "daily":
             self.daily_table_splitter = splitter
             self.daily_detail_title = title
@@ -892,12 +983,27 @@ class MainWindow(QMainWindow):
     def run_daily(self) -> None:
         if self.daily_worker and self.daily_worker.isRunning():
             return
+        if not self._require_active_profile():
+            return
+        self.all_daily_papers = []
+        self.daily_papers = []
+        self.populate_table(self.daily_table, [])
+        self.daily_progress.setValue(0)
+        self.daily_progress_text.setText("正在准备检索")
         self.daily_status_label.setText("正在检索")
         self.daily_run_btn.setEnabled(False)
         self.daily_stop_btn.setEnabled(True)
         top_journals_enabled = self.daily_top_journals.isChecked()
         sources = {"arxiv": self.daily_arxiv.isChecked(), "rss": top_journals_enabled, "crossref": top_journals_enabled}
+        if not any(sources.values()):
+            QMessageBox.information(self, "未选择数据源", "请至少选择一个检索数据源。")
+            self.daily_status_label.setText("就绪")
+            self.daily_run_btn.setEnabled(True)
+            self.daily_stop_btn.setEnabled(False)
+            return
         self.daily_worker = DailyRadarWorker(int(self.daily_days.currentText()), sources, self.settings)
+        self.daily_worker.batch_results_ready.connect(self.on_daily_batch)
+        self.daily_worker.progress_updated.connect(self.on_daily_progress)
         self.daily_worker.finished_ok.connect(self.on_daily_finished)
         self.daily_worker.failed.connect(self.on_daily_failed)
         self.daily_worker.start()
@@ -907,6 +1013,23 @@ class MainWindow(QMainWindow):
             self.daily_worker.request_cancel()
             self.daily_status_label.setText("正在停止")
 
+    def on_daily_batch(self, papers: list[Paper], progress: dict) -> None:
+        self.all_daily_papers = papers
+        self.refresh_daily_display()
+
+    def on_daily_progress(self, progress: dict) -> None:
+        total = int(progress.get("total", 1))
+        completed = int(progress.get("completed", 0))
+        self.daily_progress.setMaximum(max(total, 1))
+        self.daily_progress.setValue(completed)
+        source = progress.get("source", "正在检索")
+        self.daily_progress_text.setText(
+            f"{source}：{completed} / {max(total, 1)}；已发现：{progress.get('found', 0)}；"
+            f"去重后：{progress.get('deduped', 0)}；命中：{progress.get('matched', 0)}；"
+            f"已显示：{len(self.daily_papers)}；成功：{progress.get('success', 0)}；失败：{progress.get('failed', 0)}"
+        )
+        self.daily_status_label.setText("正在检索")
+
     def on_daily_finished(self, papers: list[Paper], stats: dict) -> None:
         self.all_daily_papers = papers
         self.refresh_daily_display()
@@ -915,17 +1038,26 @@ class MainWindow(QMainWindow):
         self.daily_high_label.setText(f"高相关：{sum(1 for paper in self.daily_papers if paper.relevance_score >= 60)}")
         self.daily_skim_label.setText(f"值得扫读：{sum(1 for paper in self.daily_papers if 40 <= paper.relevance_score < 60)}")
         self.daily_status_label.setText("已完成")
+        self.daily_progress.setMaximum(1)
+        self.daily_progress.setValue(1)
+        self.daily_progress_text.setText(
+            f"完成；已发现：{sum(int(stats.get(key, 0)) for key in ['arxiv', 'rss', 'crossref'])}；"
+            f"入库候选：{len(self.all_daily_papers)}；当前显示：{len(self.daily_papers)}；失败：{stats.get('failed', 0)}"
+        )
         self.daily_run_btn.setEnabled(True)
         self.daily_stop_btn.setEnabled(False)
 
     def on_daily_failed(self, message: str) -> None:
         self.daily_status_label.setText("失败")
+        self.daily_progress_text.setText(f"失败：{message}")
         self.daily_run_btn.setEnabled(True)
         self.daily_stop_btn.setEnabled(False)
         QMessageBox.warning(self, "每日雷达失败", message)
 
     def run_survey(self) -> None:
         if self.survey_worker and self.survey_worker.isRunning():
+            return
+        if not self._require_active_profile():
             return
         from_date, until_date = self._survey_dates()
         top_journals_enabled = self.survey_top_journals.isChecked()
@@ -1369,12 +1501,17 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "profile_table"):
             return
         active = load_active_profile()
-        active_id = active.get("profile_id", DEFAULT_PROFILE_ID)
-        self.profile_status_label.setText(
-            f"当前激活研究方向：{active.get('display_name', '未知')}\n"
-            f"Profile ID：{active_id}\n"
-            f"描述：{active.get('description', '')}"
-        )
+        active_id = str(active.get("profile_id") or "")
+        if active_id:
+            self.profile_status_label.setText(
+                f"当前激活研究方向：{active.get('display_name', '未知')}\n"
+                f"Profile ID：{active_id}\n"
+                f"描述：{active.get('description', '')}"
+            )
+        else:
+            self.profile_status_label.setText(
+                "当前没有激活的研究方向。\n请导入或创建一个 Profile 后设为当前方向，否则每日雷达和历史调研不会开始检索。"
+            )
         profiles = load_all_profiles()
         self.profile_table.setRowCount(0)
         for row, profile in enumerate(profiles):
@@ -1394,6 +1531,11 @@ class MainWindow(QMainWindow):
                 item = QTableWidgetItem(str(value))
                 item.setData(Qt.ItemDataRole.UserRole, row)
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                if profile.get("profile_id") == active_id:
+                    item.setBackground(QBrush(QColor("#DBEAFE")))
+                    font = item.font()
+                    font.setBold(True)
+                    item.setFont(font)
                 self.profile_table.setItem(row, col, item)
         self.keyword_filter = KeywordFilter(load_keywords())
 
@@ -1433,6 +1575,9 @@ class MainWindow(QMainWindow):
 
     def copy_current_profile(self) -> None:
         profile = load_active_profile()
+        if not profile:
+            QMessageBox.information(self, "没有当前方向", "当前没有可复制的研究方向 Profile。")
+            return
         QApplication.clipboard().setText(yaml.safe_dump(profile, allow_unicode=True, sort_keys=False))
         QMessageBox.information(self, "已复制", "当前 Profile YAML 已复制到剪贴板。")
 
@@ -1451,12 +1596,13 @@ class MainWindow(QMainWindow):
         if not profile:
             return
         profile_id = str(profile.get("profile_id", ""))
+        message = f"确定删除 Profile：{profile_id}？"
         if profile_id == DEFAULT_PROFILE_ID:
-            QMessageBox.information(self, "不能删除", "内置默认光计算 Profile 不建议删除。")
-            return
-        if QMessageBox.question(self, "确认删除", f"确定删除 Profile：{profile_id}？") != QMessageBox.StandardButton.Yes:
+            message += "\n\n这是内置默认光计算 Profile。删除后软件不会自动重新创建；没有其他 Profile 时，检索会提示先配置研究方向。"
+        if QMessageBox.question(self, "确认删除", message) != QMessageBox.StandardButton.Yes:
             return
         delete_profile(profile_id)
+        self.settings = load_settings()
         self.refresh_profile_page()
 
     def generate_and_copy_profile_prompt(self) -> None:
@@ -1525,7 +1671,7 @@ class MainWindow(QMainWindow):
         config_btn = box.addButton("去配置研究方向", QMessageBox.ButtonRole.ActionRole)
         box.exec()
         if box.clickedButton() == default_btn:
-            ensure_default_profile_available()
+            ensure_default_profile_available(force=True)
             set_active_profile(DEFAULT_PROFILE_ID)
             self.refresh_profile_page()
         elif box.clickedButton() == config_btn:

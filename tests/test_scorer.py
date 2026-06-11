@@ -1,7 +1,7 @@
-from optical_radar.keyword_filter import KeywordFilter
-from optical_radar.models import Paper
-from optical_radar.scorer import relevance_label, score_paper
-from optical_radar.settings import DEFAULT_KEYWORDS
+﻿from paper_radar.keyword_filter import KeywordFilter
+from paper_radar.models import Paper
+from paper_radar.scorer import relevance_label, score_paper
+from paper_radar.settings import DEFAULT_KEYWORDS
 
 
 def _score(paper: Paper) -> tuple[int, str, dict[str, list[str]]]:

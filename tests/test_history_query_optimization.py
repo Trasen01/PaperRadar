@@ -1,10 +1,10 @@
-from pathlib import Path
+﻿from pathlib import Path
 
 import yaml
 
-from optical_radar import crossref_client
-from optical_radar.cache_manager import enforce_cache_limit
-from optical_radar.profile_terms import sanitize_search_queries
+from paper_radar import crossref_client
+from paper_radar.cache_manager import enforce_cache_limit
+from paper_radar.profile_terms import sanitize_search_queries
 
 
 def test_sanitize_search_queries_filters_journals_and_broad_terms():

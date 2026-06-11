@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import sys
 from pathlib import Path
@@ -9,8 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from optical_radar.journal_fetcher import extract_entry_summary  # noqa: E402
-from optical_radar.settings import load_sources  # noqa: E402
+from paper_radar.journal_fetcher import extract_entry_summary  # noqa: E402
+from paper_radar.settings import load_sources  # noqa: E402
 
 try:
     import feedparser

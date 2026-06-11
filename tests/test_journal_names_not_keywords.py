@@ -1,7 +1,7 @@
-from optical_radar.keyword_filter import KeywordFilter
-from optical_radar.models import Paper
-from optical_radar.profile_manager import parse_profile_input
-from optical_radar.scorer import score_paper
+﻿from paper_radar.keyword_filter import KeywordFilter
+from paper_radar.models import Paper
+from paper_radar.profile_manager import parse_profile_input
+from paper_radar.scorer import score_paper
 
 
 PROFILE_TEXT = """

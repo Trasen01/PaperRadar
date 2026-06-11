@@ -1,6 +1,6 @@
-from optical_radar.crossref_client import build_search_queries_from_keywords
-from optical_radar.profile_manager import parse_profile_input
-from optical_radar.profile_terms import is_likely_journal_name
+﻿from paper_radar.crossref_client import build_search_queries_from_keywords
+from paper_radar.profile_manager import parse_profile_input
+from paper_radar.profile_terms import is_likely_journal_name
 
 
 def test_likely_journal_names_are_detected():

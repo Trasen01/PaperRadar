@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import importlib.util
 import os
@@ -25,7 +25,7 @@ def _prepare_qt_dll_paths() -> None:
 
 _prepare_qt_dll_paths()
 
-from optical_radar.app import main
+from paper_radar.app import main
 
 
 if __name__ == "__main__":

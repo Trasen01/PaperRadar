@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import sys
@@ -9,11 +9,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from optical_radar.crossref_client import CrossrefClient, build_search_queries_from_keywords  # noqa: E402
-from optical_radar.keyword_filter import KeywordFilter  # noqa: E402
-from optical_radar.scorer import score_paper  # noqa: E402
-from optical_radar.settings import load_keywords, load_sources  # noqa: E402
-from optical_radar.utils import REPORTS_DIR, ensure_directories, format_date_only  # noqa: E402
+from paper_radar.crossref_client import CrossrefClient, build_search_queries_from_keywords  # noqa: E402
+from paper_radar.keyword_filter import KeywordFilter  # noqa: E402
+from paper_radar.scorer import score_paper  # noqa: E402
+from paper_radar.settings import load_keywords, load_sources  # noqa: E402
+from paper_radar.utils import REPORTS_DIR, ensure_directories, format_date_only  # noqa: E402
 
 
 def main() -> int:

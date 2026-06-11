@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_SETTINGS = {
     "app_version": __version__,
     "active_profile": "optical_computing",
+    "default_profile_deleted": False,
     "first_run_completed": False,
     "days_back": 7,
     "max_results": 100,

@@ -1,8 +1,8 @@
-import re
+﻿import re
 
 import yaml
 
-from optical_radar.profile_manager import generate_profile_prompt, make_profile_id, parse_profile_input
+from paper_radar.profile_manager import generate_profile_prompt, make_profile_id, parse_profile_input
 
 
 VALID_YAML = """

@@ -599,7 +599,7 @@ class MainWindow(QMainWindow):
         self.daily_min_score = QSpinBox()
         self.daily_min_score.setRange(20, 100)
         self.daily_min_score.setValue(20)
-        self.daily_arxiv = QCheckBox("预印本论文")
+        self.daily_arxiv = QCheckBox("预印本（arXiv）")
         self.daily_arxiv.setToolTip("来自 arXiv，适合快速发现尚未正式发表的新论文。")
         self.daily_arxiv.setChecked(True)
         self.daily_rss = QCheckBox("期刊最新文章")
@@ -690,7 +690,7 @@ class MainWindow(QMainWindow):
         self.survey_crossref = QCheckBox("顶级期刊历史检索")
         self.survey_crossref.setToolTip("按当前研究方向关键词，在配置的顶级期刊中做系统检索。")
         self.survey_crossref.setChecked(True)
-        self.survey_arxiv = QCheckBox("预印本论文")
+        self.survey_arxiv = QCheckBox("预印本（arXiv）")
         self.survey_arxiv.setToolTip("来自 arXiv；历史范围较长时可能较慢，如只做顶刊调研可不勾选。")
         self.survey_rss = QCheckBox("期刊最新文章")
         self.survey_rss.setToolTip("只适合补充最新文章动态，不适合作为完整历史调研来源。")
@@ -1021,7 +1021,7 @@ class MainWindow(QMainWindow):
         journals: list[str] = []
         if mode == "daily":
             if self.daily_arxiv.isChecked():
-                selected_sources.append("预印本论文")
+                selected_sources.append("预印本（arXiv）")
             if self.daily_rss.isChecked():
                 selected_sources.append("期刊最新文章")
                 journals.extend(
@@ -1045,7 +1045,7 @@ class MainWindow(QMainWindow):
                     if source.get("crossref_enabled") and source.get("name")
                 )
             if self.survey_arxiv.isChecked():
-                selected_sources.append("预印本论文")
+                selected_sources.append("预印本（arXiv）")
             if self.survey_rss.isChecked():
                 selected_sources.append("期刊最新文章")
                 journals.extend(
@@ -1073,7 +1073,7 @@ class MainWindow(QMainWindow):
         text = (
             f"当前研究方向：{profile.get('display_name') or profile.get('profile_id') or '未命名'}\n\n"
             f"已选择的数据来源：\n{block(selected_sources, '- 暂未选择数据来源')}\n\n"
-            f"会检索的期刊：\n{block(journals, '- 预印本论文不按期刊筛选；若未选择期刊来源，则不会显示期刊列表。')}\n\n"
+            f"会检索的期刊：\n{block(journals, '- 预印本（arXiv）不按期刊筛选；若未选择期刊来源，则不会显示期刊列表。')}\n\n"
             f"用于远程检索的关键词/检索式：\n{block(queries, '- 当前 Profile 没有配置 search_queries')}\n\n"
             f"用于本地判断相关性的关键词：\n{block(match_terms, '- 当前 Profile 没有配置 keyword_groups')}"
         )
@@ -1503,7 +1503,7 @@ class MainWindow(QMainWindow):
             open_url(self.selected_paper.url)
 
     def _source_type_label(self, source_type: str) -> str:
-        return {"arxiv": "预印本论文", "journal_rss": "期刊最新文章", "crossref": "顶刊历史检索"}.get(source_type, source_type or "未知")
+        return {"arxiv": "预印本（arXiv）", "journal_rss": "期刊最新文章", "crossref": "顶刊历史检索"}.get(source_type, source_type or "未知")
 
     def _setup_tray(self) -> None:
         if QSystemTrayIcon.isSystemTrayAvailable():

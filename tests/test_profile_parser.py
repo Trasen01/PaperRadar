@@ -156,6 +156,10 @@ def test_profile_prompt_requires_group_limit_and_top_journals():
     assert "MUST NOT exceed 10 groups" in prompt
     assert "MUST include Nature and Science" in prompt
     assert "no more than 10 journals" in prompt
+    assert "search_queries ONLY for remote database retrieval" in prompt
+    assert "keyword_groups for local keyword matching" in prompt
+    assert "recommended_journals are only journal recommendations" in prompt
+    assert "must NOT be repeated in search_queries or keyword_groups" in prompt
 
 
 def test_profile_id_is_lower_snake_case():

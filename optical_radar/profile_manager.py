@@ -493,13 +493,28 @@ Hard requirements:
 16. If uncertain, generate reasonable placeholders instead of omitting fields.
 17. Use English keywords because paper databases mainly use English metadata.
 18. display_name may use Chinese.
-19. search_queries should be precise, 8 to 15 items.
-20. keyword_groups should contain 4 to 8 groups and MUST NOT exceed 10 groups.
-21. priority must be high, medium, or low.
-22. exclude_terms should contain 5 to 20 terms.
-23. recommended_journals must be top journals for this exact research field, MUST include Nature and Science, and MUST contain no more than 10 journals.
-24. Do not list broad low-quality venues or unrelated journals; recommended_journals should help search high-impact papers in this field.
-25. profile_id must be lower_snake_case English.
+19. PaperRadar uses search_queries ONLY for remote database retrieval. Keep them precise, 8 to 15 items, and never more than 20.
+20. PaperRadar uses keyword_groups for local keyword matching, relevance scoring, and explanation.
+21. Do NOT put journal names, publisher names, or source names into search_queries or keyword_groups.
+22. Do NOT use broad standalone search queries such as Nature, Science, Light, Optica, optics, photonics, silicon photonics, integrated photonics, or metasurface.
+23. search_queries should be compact research phrases that can retrieve candidate papers, not every possible keyword.
+24. keyword_groups should contain 4 to 8 groups and MUST NOT exceed 10 groups.
+25. Each keyword group should represent a meaningfully different relevance signal, for example core_problem, device_or_method, material_or_platform, measurement_or_application.
+26. Put the strongest, most specific title/abstract phrases in high priority groups.
+27. Put broad context terms only in medium or low priority groups, and combine them with specific terms where possible.
+28. priority must be high, medium, or low.
+29. exclude_terms should contain 5 to 20 terms and should reduce false positives.
+30. recommended_journals must be top journals for this exact research field, MUST include Nature and Science, and MUST contain no more than 10 journals.
+31. recommended_journals are only journal recommendations. They are NOT keywords and must NOT be repeated in search_queries or keyword_groups.
+32. Do not list broad low-quality venues or unrelated journals; recommended_journals should help search high-impact papers in this field.
+33. profile_id must be lower_snake_case English.
+
+Scoring-aware writing guidance:
+- A paper scores well when its title or abstract matches specific keyword_groups terms.
+- A paper does NOT score well just because it is from Nature, Science, Optica, or another recommended journal.
+- Prefer phrases that would realistically appear in paper titles or abstracts.
+- Include several specific multi-word phrases for the core research object, method, device, material, task, and application.
+- Avoid making search_queries too many or too broad; remote retrieval should be small, and local scoring will use keyword_groups.
 
 Wrong example, do NOT output like this:
 

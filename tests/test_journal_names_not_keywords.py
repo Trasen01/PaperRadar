@@ -116,3 +116,40 @@ def test_abstract_research_keyword_matches():
 
     assert "thin-film lithium niobate electro-optic modulator" in paper.matched_keywords
     assert "Science" not in paper.matched_keywords
+
+
+def test_combined_title_and_abstract_hits_get_combo_bonus():
+    keyword_filter, _ = _filter_from_profile()
+    paper = Paper(
+        title="Lithium niobate modulator for compact photonic links",
+        abstract="The thin-film lithium niobate electro-optic modulator shows low voltage operation.",
+        journal_or_source="Nature Photonics",
+        source_type="crossref",
+        source_quality_score=20,
+        categories=["optics"],
+    )
+    locations = keyword_filter.match_with_locations(paper)
+    matches = keyword_filter.flatten_location_matches(locations)
+    score, _ = score_paper(paper, matches, keyword_filter.title_matches(paper), locations)
+
+    assert score >= 50
+    assert paper.score_breakdown["combo_bonus"] > 0
+    assert paper.score_breakdown["strong_title_hit"] is True
+
+
+def test_broad_single_term_is_capped():
+    keyword_filter = KeywordFilter({"core": ["photonic computing"], "exclude": []})
+    paper = Paper(
+        title="Photonic computing perspective",
+        abstract="A short overview with no specific device, task, or architecture.",
+        journal_or_source="Science",
+        source_type="crossref",
+        source_quality_score=20,
+        categories=["optics"],
+    )
+    locations = keyword_filter.match_with_locations(paper)
+    matches = keyword_filter.flatten_location_matches(locations)
+    score, _ = score_paper(paper, matches, keyword_filter.title_matches(paper), locations)
+
+    assert score <= 35
+    assert paper.score_breakdown["broad_single_term_cap"] is True

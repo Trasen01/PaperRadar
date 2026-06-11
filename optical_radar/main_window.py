@@ -1333,9 +1333,28 @@ class MainWindow(QMainWindow):
         text.setPlainText(
             f"摘要\n{paper.abstract or '该数据源未提供完整摘要。'}\n\n"
             f"相关性说明\n{paper.reason_zh or '暂无'}\n\n"
+            f"评分拆解\n{self._score_breakdown_text(paper)}\n\n"
             f"链接\n{paper.url or '无'}"
         )
         btn.setEnabled(bool(paper.url))
+
+    def _score_breakdown_text(self, paper: Paper) -> str:
+        data = paper.score_breakdown or {}
+        if not data:
+            return "暂无评分拆解。"
+        yes_no = lambda value: "是" if bool(value) else "否"
+        return (
+            f"关键词分：{data.get('keyword_score', 0)}\n"
+            f"组合加分：{data.get('combo_bonus', 0)}\n"
+            f"来源加分：{data.get('source_quality_score', 0)}\n"
+            f"排除词扣分：{data.get('penalty_score', 0)}\n"
+            f"标题强相关保护：{yes_no(data.get('strong_title_hit'))}"
+            f"{'，保底到 ' + str(data.get('title_floor_applied')) + ' 分' if data.get('title_floor_applied') else ''}\n"
+            f"宽泛单关键词封顶：{yes_no(data.get('broad_single_term_cap'))}\n"
+            f"仅平台/器件词封顶：{yes_no(data.get('supporting_only_cap'))}\n"
+            f"无研究关键词封顶：{yes_no(data.get('no_positive_keyword_cap'))}\n"
+            f"最终分数：{data.get('final_score', paper.relevance_score)}"
+        )
 
     def generate_daily_report(self) -> None:
         path = generate_daily_report(self.daily_papers)

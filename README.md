@@ -1,28 +1,27 @@
 # PaperRadar
 
-PaperRadar is a lightweight desktop literature radar for researchers. It helps monitor new papers, run historical literature surveys, configure research-direction Profiles, score relevance, store results locally, and generate Markdown reports.
+PaperRadar is a lightweight Windows desktop literature radar for researchers. It helps you monitor new papers every day, run historical literature surveys before starting a project, manage research-direction Profiles, score relevance locally, store papers in SQLite, and generate Markdown reports.
 
-The current desktop app is built with Python and PySide6. The internal Python package is still named `optical_radar` for compatibility, while the product and repository name are PaperRadar.
+The current desktop application is built with Python and PySide6. The internal Python package is still named `optical_radar` for compatibility, but the product and repository name are **PaperRadar**.
 
-## Core Features
+## What PaperRadar Does
 
-- Daily Radar for quick new-paper checks.
-- Historical Survey for longer Crossref/arXiv searches.
-- Research Profile system for changing research directions.
-- External-AI assisted Profile generation with robust YAML import.
-- arXiv search for preprints.
-- RSS daily monitoring for journal latest items.
-- Crossref top-journal historical search.
-- Local SQLite database.
-- Relevance scoring based on Profile keyword groups.
-- Markdown report generation.
-- Windows desktop GUI with system tray support.
+- **Daily Radar**: quickly check recent papers with a low-distraction result list.
+- **Historical Survey**: run longer searches over selected time ranges for project planning and literature review.
+- **Research Profiles**: switch the software to a specific research direction through configurable YAML Profiles.
+- **AI-assisted Profile drafting**: generate a prompt, paste it into an external AI tool, and import the returned YAML with a tolerant parser.
+- **Preprint search**: query arXiv for recent and historical preprints.
+- **Top-journal search**: combine latest journal monitoring and Crossref-based top-journal retrieval behind a user-friendly top-journal option.
+- **Local relevance scoring**: score papers from title, abstract, categories, keyword groups, exclusion terms, and source quality.
+- **Local database**: keep papers in a local SQLite database.
+- **Reports**: export Daily Radar and Historical Survey results as Markdown.
+- **System tray support**: keep PaperRadar running quietly in the background.
 
 ## Screenshots
 
 Screenshots will be added later.
 
-Image assets can be placed under:
+Suggested location:
 
 ```text
 docs/images/
@@ -32,25 +31,33 @@ docs/images/
 
 ### For Regular Users
 
-Download and run:
+Download and run the Windows installer:
 
 ```text
-PaperRadar_Setup_vX.Y.Z.exe
+PaperRadar_Setup_v0.2.0.exe
 ```
 
-The installer creates Start Menu shortcuts, can optionally create a desktop shortcut, and can launch PaperRadar after installation.
+The installer supports:
+
+- installation to the standard Windows program folder;
+- Start Menu shortcut;
+- optional desktop shortcut;
+- launch after installation;
+- upgrade installation using a fixed application ID.
+
+Uninstalling PaperRadar removes the program files only. It does not delete your Profiles, database, reports, or logs.
 
 ### For Developers
 
 ```powershell
-git clone <your-repo-url> PaperRadar
+git clone <repo-url> PaperRadar
 cd PaperRadar
 python -m venv .venv
 .\.venv\Scripts\pip install -r requirements.txt
 .\.venv\Scripts\python run.py
 ```
 
-## User Data Location
+## User Data
 
 PaperRadar stores user data in:
 
@@ -73,58 +80,77 @@ Typical contents:
   reports\
   logs\
     paper_radar.log
+  cache\
 ```
 
-Updating or reinstalling PaperRadar does not delete these files by default. Uninstalling removes program files only. To fully remove all user data, manually delete `%APPDATA%\PaperRadar\`.
+Updating or reinstalling PaperRadar does not overwrite these files by default. To completely remove all local user data, delete `%APPDATA%\PaperRadar\` manually.
 
 ## Research Profiles
 
-Profiles define a research direction:
+A Profile tells PaperRadar what your research direction is. It contains:
 
-- search queries;
-- keyword groups;
-- exclusion terms;
-- recommended top journals.
+- `search_queries`: compact phrases used for remote retrieval;
+- `keyword_groups`: terms used for local matching and scoring;
+- `exclude_terms`: terms that reduce false positives;
+- `recommended_journals`: top journals worth watching for the field.
 
-The default Profile is Optical Computing. You can create your own direction from the Profile page:
+The default bundled Profile is **Optical Computing**. You can create a custom Profile from the Research Profile page:
 
-1. Enter a research direction, such as `ultrafast photonics`.
-2. Generate and copy the AI prompt.
-3. Paste the prompt into an external AI tool.
-4. Use the AI tool's copy button or copy shortcut, if available.
-5. Paste the returned YAML into PaperRadar.
-6. Use smart parsing and save it as the current direction.
+1. Enter a research direction, for example `ultrafast photonics`.
+2. Generate the AI prompt.
+3. Paste it into an external AI assistant.
+4. Use the external AI app's copy button or shortcut if available.
+5. Paste the YAML back into PaperRadar.
+6. Use smart parsing to preview and normalize the Profile.
+7. Set it as the active research direction.
 
-PaperRadar does not include or call an LLM API. External AI is only used to help users draft Profile YAML.
-
-See [docs/profile_guide.md](docs/profile_guide.md) for details.
+PaperRadar does not include an LLM and does not call any AI API. External AI is only used to help draft Profile YAML.
 
 ## Data Sources
 
-### arXiv
+### Preprints (arXiv)
 
-Used for preprint search. It supports date ranges and works well for daily checks and historical surveys.
+PaperRadar can search arXiv for preprints. This works well for both daily checks and broader historical surveys, although arXiv can occasionally be slow or time out.
 
-### RSS Daily Monitoring
+### Top Journals
 
-RSS is for monitoring latest/current journal entries. RSS feeds are not historical literature databases and often do not provide complete abstracts.
+The user interface presents a single **Top Journals** option. Internally, PaperRadar can use:
 
-### Crossref Top-Journal Historical Search
+- RSS feeds for latest journal items;
+- Crossref for historical top-journal retrieval.
 
-Crossref is used for top-journal historical search across a selected time range. Crossref metadata quality varies by publisher; some records have no abstract.
+RSS feeds are useful for daily monitoring, but they are not historical literature databases and often do not provide complete abstracts. Crossref is better for historical discovery, but metadata quality varies by publisher.
+
+## Relevance Scoring
+
+PaperRadar uses local rule-based scoring. A paper scores well when its title or abstract matches the active Profile's research keywords. Journal names such as Nature, Science, Optica, and Light are not treated as research keywords.
+
+The score uses:
+
+- keyword matches in title and abstract;
+- combination bonuses for multiple meaningful matches;
+- source quality as an auxiliary signal;
+- exclusion-term penalties;
+- caps for broad or weak matches.
+
+The paper detail panel shows a score breakdown so users can understand why a result was ranked.
 
 ## Reports
 
-PaperRadar generates Markdown reports for:
+Reports are saved under:
 
-- daily radar results;
-- historical literature surveys.
+```text
+%APPDATA%\PaperRadar\reports\
+```
 
-Reports are saved under `%APPDATA%\PaperRadar\reports`.
+PaperRadar currently supports:
 
-## Build
+- Daily Radar reports;
+- Historical Survey reports.
 
-### Build EXE
+## Building the Windows App
+
+### Build the EXE
 
 ```powershell
 .\build_scripts\build_exe.ps1 -Python .\.venv\Scripts\python.exe
@@ -136,7 +162,9 @@ Output:
 dist\PaperRadar\PaperRadar.exe
 ```
 
-### Build Windows Installer
+The build script closes any running PaperRadar process before packaging, preventing file-lock issues during rebuilds.
+
+### Build the Installer
 
 Install Inno Setup 6, then run:
 
@@ -150,41 +178,43 @@ Output:
 dist\installer\PaperRadar_Setup_v0.2.0.exe
 ```
 
-The first installer version supports standard Inno Setup installation, optional desktop shortcut, Start Menu shortcut, and launch-after-install. It uses a fixed AppId so later versions can be installed as updates. The installer does not delete `%APPDATA%\PaperRadar`.
+The installer is generated from:
 
-## Updating
-
-Install the new setup package over the old version. User settings, Profiles, database, logs, and reports are stored in `%APPDATA%\PaperRadar` and are preserved by default.
+```text
+installer\PaperRadar.iss
+```
 
 ## Project Structure
 
 ```text
 PaperRadar/
   README.md
+  LICENSE
   requirements.txt
   run.py
   optical_radar/
   resources/
-    app_icon.ico
     default_profiles/
   config_templates/
   build_scripts/
   installer/
+  scripts/
   tests/
   docs/
 ```
 
-## GitHub Upload
+## GitHub Notes
 
-After reviewing files:
+Do not commit local runtime data or build artifacts. The repository `.gitignore` excludes:
 
-```powershell
-git init
-git add .
-git commit -m "Initial PaperRadar project"
-```
+- `build/`
+- `dist/`
+- local `config/`, `profiles/`, `data/`, `reports/`, `logs/`
+- SQLite databases
+- virtual environments
+- cache and test artifacts
 
-Create the GitHub repository after deciding whether it should be public or private:
+To create a GitHub repository after deciding whether it should be public or private:
 
 ```powershell
 gh repo create PaperRadar --private --source=. --remote=origin --push
@@ -196,13 +226,19 @@ or:
 gh repo create PaperRadar --public --source=. --remote=origin --push
 ```
 
-Do not commit `dist`, `build`, databases, logs, reports, or local user data.
+If GitHub CLI is not installed, create a repository named `PaperRadar` on GitHub, then run:
+
+```powershell
+git remote add origin https://github.com/<your-user-or-org>/PaperRadar.git
+git push -u origin main
+```
 
 ## Limitations
 
 - RSS feeds are not historical literature databases.
 - Crossref does not guarantee complete abstracts.
-- Relevance scoring is rule-based and depends on the active Profile.
+- arXiv requests can occasionally time out.
+- Relevance scoring is rule-based and depends on Profile quality.
 - PaperRadar does not include an LLM and does not call external AI APIs.
 - Some publishers expose limited metadata through public APIs.
 
@@ -214,7 +250,7 @@ Do not commit `dist`, `build`, databases, logs, reports, or local user data.
 - Citation and reference analysis.
 - BibTeX/Zotero export.
 - More complete per-user/all-user installer modes.
-- Automatic update mechanism.
+- Automatic update support.
 
 ## License
 

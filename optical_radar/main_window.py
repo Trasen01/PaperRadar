@@ -11,7 +11,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import yaml
-from PySide6.QtCore import QDate, QSettings, QThread, Signal, Qt
+from PySide6.QtCore import QDate, QEvent, QSettings, QThread, Signal, Qt
 from PySide6.QtGui import QBrush, QColor, QFont, QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -55,6 +55,7 @@ from .profile_manager import (
     get_profile_path,
     load_active_profile,
     load_all_profiles,
+    profile_to_keywords,
     save_profile,
     set_active_profile,
     validate_profile_yaml,
@@ -355,7 +356,7 @@ class HistoricalSurveyWorker(QThread):
                         stats["timeouts"] += 1
                     logger.warning("SURVEY_SOURCE_FAILED source_type=journal_rss query=RSS timeout=%s error=%s", timeout, exc)
                 completed += 1
-                self._handle_batch(rss.papers, all_seen, stats, completed, total_steps, "RSS 每日监控", "RSS")
+                self._handle_batch(rss.papers, all_seen, stats, completed, total_steps, "期刊最新文章", "最新文章")
 
             if self.sources.get("crossref"):
                 tasks: list[tuple[dict[str, Any], str, list[str]]] = []
@@ -423,7 +424,7 @@ class HistoricalSurveyWorker(QThread):
                             while len(pending) < max_workers and task_index < len(tasks) and not self.cancel_requested:
                                 submit_next(executor)
                     if batch_papers:
-                        self._handle_batch(batch_papers, all_seen, stats, completed, total_steps, "Crossref", "batch", cached=False, batch_index=batch_index, started_at=start_time)
+                        self._handle_batch(batch_papers, all_seen, stats, completed, total_steps, "顶刊历史检索", "批量结果", cached=False, batch_index=batch_index, started_at=start_time)
 
             if self.cancel_requested:
                 status = "stopped"
@@ -501,7 +502,7 @@ class HistoricalSurveyWorker(QThread):
 class MainWindow(QMainWindow):
     def __init__(self, first_run_needed: bool = False) -> None:
         super().__init__()
-        self.setWindowTitle("PaperRadar / 文献雷达")
+        self.setWindowTitle("PaperRadar")
         self.resize(1280, 820)
         if APP_ICON_PATH.exists():
             self.setWindowIcon(QIcon(str(APP_ICON_PATH)))
@@ -520,12 +521,14 @@ class MainWindow(QMainWindow):
         self.selected_paper: Paper | None = None
         self.cell_popup: QDialog | None = None
         self.cell_popup_key: tuple[int, int, int] | None = None
+        self.pending_cell_key: tuple[int, int, int] | None = None
         self.normalized_profile_yaml = ""
         self.allow_exit = False
         self.tray: RadarTrayIcon | None = None
         self.validated_profile: dict[str, Any] | None = None
 
         self._build_ui()
+        QApplication.instance().installEventFilter(self)
         self._setup_tray()
         self.refresh_profile_page()
         if first_run_needed:
@@ -569,7 +572,7 @@ class MainWindow(QMainWindow):
         root = QVBoxLayout(page)
         root.setContentsMargins(22, 18, 22, 18)
         root.setSpacing(14)
-        root.addWidget(self._page_header("每日雷达", "快速检查最近新文献，只展示命中当前研究方向且达到显示分数的结果。"))
+        root.addWidget(self._page_header("每日雷达", "开始检查前，请先在“研究方向配置”中设置自己的研究方向。这里用于每天快速查看最近出现的新论文。"))
 
         status = QGroupBox("状态")
         status_layout = QHBoxLayout(status)
@@ -596,11 +599,14 @@ class MainWindow(QMainWindow):
         self.daily_min_score = QSpinBox()
         self.daily_min_score.setRange(20, 100)
         self.daily_min_score.setValue(20)
-        self.daily_arxiv = QCheckBox("arXiv")
+        self.daily_arxiv = QCheckBox("预印本论文")
+        self.daily_arxiv.setToolTip("来自 arXiv，适合快速发现尚未正式发表的新论文。")
         self.daily_arxiv.setChecked(True)
-        self.daily_rss = QCheckBox("RSS 每日监控")
+        self.daily_rss = QCheckBox("期刊最新文章")
+        self.daily_rss.setToolTip("从期刊提供的最新文章列表中查看近期更新，不等同于完整历史检索。")
         self.daily_rss.setChecked(True)
-        self.daily_crossref = QCheckBox("Crossref 近期检索")
+        self.daily_crossref = QCheckBox("顶级期刊近期检索")
+        self.daily_crossref.setToolTip("按当前研究方向关键词，在顶级期刊数据库中检索近期文章。")
         self.daily_crossref.setChecked(False)
         for label, widget in [("检索最近天数", self.daily_days), ("显示最低分", self.daily_min_score)]:
             row.addWidget(QLabel(label))
@@ -618,11 +624,13 @@ class MainWindow(QMainWindow):
         self.daily_stop_btn.setEnabled(False)
         self.daily_report_btn = QPushButton("生成今日报告")
         self.daily_open_reports_btn = QPushButton("打开报告文件夹")
+        self.daily_scope_btn = QPushButton("查看检索范围")
         self._style_button(self.daily_run_btn, "primary")
         self._style_button(self.daily_stop_btn, "danger")
         self._style_button(self.daily_report_btn)
         self._style_button(self.daily_open_reports_btn)
-        for button in [self.daily_run_btn, self.daily_stop_btn, self.daily_report_btn, self.daily_open_reports_btn]:
+        self._style_button(self.daily_scope_btn)
+        for button in [self.daily_run_btn, self.daily_stop_btn, self.daily_report_btn, self.daily_open_reports_btn, self.daily_scope_btn]:
             actions.addWidget(button)
         actions.addStretch(1)
         root.addLayout(actions)
@@ -634,6 +642,7 @@ class MainWindow(QMainWindow):
         self.daily_stop_btn.clicked.connect(self.stop_daily)
         self.daily_report_btn.clicked.connect(self.generate_daily_report)
         self.daily_open_reports_btn.clicked.connect(self.open_report_folder)
+        self.daily_scope_btn.clicked.connect(lambda: self.show_search_scope("daily"))
         self.daily_table.cellClicked.connect(lambda row, col: self.on_table_cell_clicked(self.daily_table, row, col))
         self.daily_min_score.valueChanged.connect(lambda _: self.refresh_daily_display())
         return page
@@ -643,7 +652,7 @@ class MainWindow(QMainWindow):
         root = QVBoxLayout(page)
         root.setContentsMargins(22, 18, 22, 18)
         root.setSpacing(14)
-        root.addWidget(self._page_header("历史调研", "面向课题调研的长任务检索，支持缓存、进度追踪和分批展示结果。"))
+        root.addWidget(self._page_header("历史调研", "开始调研前，请先在“研究方向配置”中设置自己的研究方向。这里用于系统检索一段时间内的相关论文。"))
 
         settings = QGroupBox("调研设置")
         row = QHBoxLayout(settings)
@@ -678,11 +687,13 @@ class MainWindow(QMainWindow):
         source_row = QHBoxLayout(source_box)
         source_row.setContentsMargins(14, 18, 14, 14)
         source_row.setSpacing(10)
-        self.survey_crossref = QCheckBox("Crossref 顶刊历史检索")
+        self.survey_crossref = QCheckBox("顶级期刊历史检索")
+        self.survey_crossref.setToolTip("按当前研究方向关键词，在配置的顶级期刊中做系统检索。")
         self.survey_crossref.setChecked(True)
-        self.survey_arxiv = QCheckBox("arXiv")
-        self.survey_arxiv.setToolTip("arXiv 历史检索可能较慢，如仅需顶刊调研，可只选择 Crossref 顶刊历史检索。")
-        self.survey_rss = QCheckBox("RSS 每日监控")
+        self.survey_arxiv = QCheckBox("预印本论文")
+        self.survey_arxiv.setToolTip("来自 arXiv；历史范围较长时可能较慢，如只做顶刊调研可不勾选。")
+        self.survey_rss = QCheckBox("期刊最新文章")
+        self.survey_rss.setToolTip("只适合补充最新文章动态，不适合作为完整历史调研来源。")
         self.survey_ignore_cache = QCheckBox("忽略缓存，重新检索")
         source_row.addWidget(self.survey_crossref)
         source_row.addWidget(self.survey_arxiv)
@@ -699,11 +710,13 @@ class MainWindow(QMainWindow):
         self.survey_stop_btn.setEnabled(False)
         self.survey_report_btn = QPushButton("生成调研报告")
         self.survey_open_reports_btn = QPushButton("打开报告文件夹")
+        self.survey_scope_btn = QPushButton("查看检索范围")
         self._style_button(self.survey_run_btn, "primary")
         self._style_button(self.survey_stop_btn, "danger")
         self._style_button(self.survey_report_btn)
         self._style_button(self.survey_open_reports_btn)
-        for button in [self.survey_run_btn, self.survey_stop_btn, self.survey_report_btn, self.survey_open_reports_btn]:
+        self._style_button(self.survey_scope_btn)
+        for button in [self.survey_run_btn, self.survey_stop_btn, self.survey_report_btn, self.survey_open_reports_btn, self.survey_scope_btn]:
             actions.addWidget(button)
         actions.addStretch(1)
         root.addLayout(actions)
@@ -729,6 +742,7 @@ class MainWindow(QMainWindow):
         self.survey_stop_btn.clicked.connect(self.stop_survey)
         self.survey_report_btn.clicked.connect(self.generate_survey_report)
         self.survey_open_reports_btn.clicked.connect(self.open_report_folder)
+        self.survey_scope_btn.clicked.connect(lambda: self.show_search_scope("survey"))
         self.survey_range.currentTextChanged.connect(self._sync_survey_date_controls)
         self._sync_survey_date_controls()
         self.survey_table.cellClicked.connect(lambda row, col: self.on_table_cell_clicked(self.survey_table, row, col))
@@ -779,6 +793,7 @@ class MainWindow(QMainWindow):
             self.profile_table.setColumnWidth(col, width)
         self.profile_table.verticalHeader().setDefaultSectionSize(44)
         self.profile_table.setMinimumHeight(178)
+        self.profile_table.viewport().installEventFilter(self)
         root.addWidget(self.profile_table)
 
         prompt_box = QGroupBox("AI 提示词生成")
@@ -849,6 +864,7 @@ class MainWindow(QMainWindow):
         self._apply_result_column_layout(table)
         header.sectionResized.connect(lambda *_: self._save_table_widths(table, prefix))
         table.cellEntered.connect(lambda row, col, t=table: self.on_result_cell_entered(t, row, col))
+        table.viewport().installEventFilter(self)
         splitter.addWidget(table)
         detail_widget = QWidget()
         detail_widget.setObjectName("paperCard")
@@ -921,7 +937,7 @@ class MainWindow(QMainWindow):
         sources = {"crossref": self.survey_crossref.isChecked(), "arxiv": self.survey_arxiv.isChecked(), "rss": self.survey_rss.isChecked()}
         self.survey_progress.setValue(0)
         if sources.get("arxiv"):
-            self.survey_status.setText("正在启动；arXiv 历史检索可能较慢，如仅需顶刊调研，可只选择 Crossref。")
+            self.survey_status.setText("正在启动；预印本历史检索可能较慢，如只需顶级期刊调研，可只选择“顶级期刊历史检索”。")
         else:
             self.survey_status.setText("正在启动")
         self.survey_run_btn.setEnabled(False)
@@ -997,6 +1013,71 @@ class MainWindow(QMainWindow):
         self.survey_run_btn.setEnabled(True)
         self.survey_stop_btn.setEnabled(False)
         QMessageBox.warning(self, "历史调研失败", message)
+
+    def show_search_scope(self, mode: str) -> None:
+        profile = load_active_profile()
+        sources = load_sources()
+        selected_sources: list[str] = []
+        journals: list[str] = []
+        if mode == "daily":
+            if self.daily_arxiv.isChecked():
+                selected_sources.append("预印本论文")
+            if self.daily_rss.isChecked():
+                selected_sources.append("期刊最新文章")
+                journals.extend(
+                    str(source.get("name"))
+                    for source in sources.get("journal_sources", [])
+                    if source.get("enabled") and source.get("name")
+                )
+            if self.daily_crossref.isChecked():
+                selected_sources.append("顶级期刊近期检索")
+                journals.extend(
+                    str(source.get("name"))
+                    for source in sources.get("top_journals", [])
+                    if source.get("crossref_enabled") and source.get("name")
+                )
+        else:
+            if self.survey_crossref.isChecked():
+                selected_sources.append("顶级期刊历史检索")
+                journals.extend(
+                    str(source.get("name"))
+                    for source in sources.get("top_journals", [])
+                    if source.get("crossref_enabled") and source.get("name")
+                )
+            if self.survey_arxiv.isChecked():
+                selected_sources.append("预印本论文")
+            if self.survey_rss.isChecked():
+                selected_sources.append("期刊最新文章")
+                journals.extend(
+                    str(source.get("name"))
+                    for source in sources.get("journal_sources", [])
+                    if source.get("enabled") and source.get("name")
+                )
+
+        keywords = profile_to_keywords(profile)
+        match_terms = []
+        for group, terms in keywords.items():
+            if group != "exclude":
+                match_terms.extend(terms)
+        queries = [str(query) for query in profile.get("search_queries") or [] if str(query).strip()]
+        journals = list(dict.fromkeys(journals))
+        match_terms = list(dict.fromkeys(match_terms))
+
+        def block(values: list[str], empty: str, limit: int = 80) -> str:
+            if not values:
+                return empty
+            shown = values[:limit]
+            suffix = f"\n... 另有 {len(values) - limit} 项" if len(values) > limit else ""
+            return "\n".join(f"- {value}" for value in shown) + suffix
+
+        text = (
+            f"当前研究方向：{profile.get('display_name') or profile.get('profile_id') or '未命名'}\n\n"
+            f"已选择的数据来源：\n{block(selected_sources, '- 暂未选择数据来源')}\n\n"
+            f"会检索的期刊：\n{block(journals, '- 预印本论文不按期刊筛选；若未选择期刊来源，则不会显示期刊列表。')}\n\n"
+            f"用于远程检索的关键词/检索式：\n{block(queries, '- 当前 Profile 没有配置 search_queries')}\n\n"
+            f"用于本地判断相关性的关键词：\n{block(match_terms, '- 当前 Profile 没有配置 keyword_groups')}"
+        )
+        QMessageBox.information(self, "当前检索范围", text)
 
     def _sync_survey_date_controls(self) -> None:
         custom = self.survey_range.currentText() == "自定义"
@@ -1116,6 +1197,27 @@ class MainWindow(QMainWindow):
         else:
             table.viewport().unsetCursor()
 
+    def eventFilter(self, watched: object, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.MouseButtonPress:
+            clicked_table = False
+            for table in (getattr(self, "daily_table", None), getattr(self, "survey_table", None), getattr(self, "profile_table", None)):
+                if table and watched is table.viewport():
+                    clicked_table = True
+                    position = event.position().toPoint() if hasattr(event, "position") else event.pos()
+                    if table.itemAt(position) is None:
+                        self._close_cell_popup()
+                        self.pending_cell_key = None
+                    break
+            if (
+                self.cell_popup
+                and self.cell_popup.isVisible()
+                and not clicked_table
+                and not (isinstance(watched, QWidget) and (watched is self.cell_popup or self.cell_popup.isAncestorOf(watched)))
+            ):
+                self._close_cell_popup()
+                self.pending_cell_key = None
+        return super().eventFilter(watched, event)
+
     def on_table_cell_clicked(self, table: QTableWidget, row: int, col: int) -> None:
         item = table.item(row, col)
         if not item:
@@ -1125,17 +1227,18 @@ class MainWindow(QMainWindow):
                 self._open_link_from_table_item(table, row, col)
                 return
             self._select_result_table_row(table, row)
+        key = (id(table), row, col)
+        if self.pending_cell_key != key:
+            self.pending_cell_key = key
+            self._close_cell_popup()
+            return
         text = item.text()
         if not text:
             return
-        key = (id(table), row, col)
         if self.cell_popup and self.cell_popup.isVisible() and self.cell_popup_key == key:
-            self.cell_popup.close()
-            self.cell_popup = None
-            self.cell_popup_key = None
+            self._close_cell_popup()
             return
-        if self.cell_popup:
-            self.cell_popup.close()
+        self._close_cell_popup()
         self.cell_popup_key = key
         self.cell_popup = QDialog(self)
         self.cell_popup.setObjectName("cellPopup")
@@ -1154,6 +1257,12 @@ class MainWindow(QMainWindow):
         pos = table.viewport().mapToGlobal(table.visualItemRect(item).bottomLeft())
         self.cell_popup.move(pos)
         self.cell_popup.show()
+
+    def _close_cell_popup(self) -> None:
+        if self.cell_popup:
+            self.cell_popup.close()
+        self.cell_popup = None
+        self.cell_popup_key = None
 
     def _select_result_table_row(self, table: QTableWidget, row: int) -> None:
         papers = self._papers_for_table(table)
@@ -1371,9 +1480,9 @@ class MainWindow(QMainWindow):
         box = QMessageBox(self)
         box.setWindowTitle("欢迎使用 PaperRadar")
         box.setText(
-            "使用 PaperRadar 前，需要先配置研究方向 Profile。\n\n"
-            "你可以使用系统内置默认方向：光计算；也可以创建自己的研究方向，例如铌酸锂调制器、拓扑光子学、超导量子比特等。\n\n"
-            "软件会根据当前 Profile 进行文献检索、关键词匹配、相关性评分和报告生成。"
+            "使用每日雷达或历史调研前，请先确认研究方向 Profile。\n\n"
+            "Profile 决定软件会用哪些关键词检索论文、如何判断相关性，以及报告里优先展示哪些结果。\n\n"
+            "你可以先使用内置默认方向：光计算；也可以进入“研究方向配置”，创建自己的方向，例如超快光子学、铌酸锂调制器、拓扑光子学等。"
         )
         default_btn = box.addButton("使用默认光计算方向", QMessageBox.ButtonRole.AcceptRole)
         config_btn = box.addButton("去配置研究方向", QMessageBox.ButtonRole.ActionRole)
@@ -1394,7 +1503,7 @@ class MainWindow(QMainWindow):
             open_url(self.selected_paper.url)
 
     def _source_type_label(self, source_type: str) -> str:
-        return {"arxiv": "arXiv", "journal_rss": "RSS 每日监控", "crossref": "顶刊历史检索"}.get(source_type, source_type or "未知")
+        return {"arxiv": "预印本论文", "journal_rss": "期刊最新文章", "crossref": "顶刊历史检索"}.get(source_type, source_type or "未知")
 
     def _setup_tray(self) -> None:
         if QSystemTrayIcon.isSystemTrayAvailable():

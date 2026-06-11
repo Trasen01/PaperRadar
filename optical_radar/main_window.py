@@ -356,7 +356,7 @@ class HistoricalSurveyWorker(QThread):
                         stats["timeouts"] += 1
                     logger.warning("SURVEY_SOURCE_FAILED source_type=journal_rss query=RSS timeout=%s error=%s", timeout, exc)
                 completed += 1
-                self._handle_batch(rss.papers, all_seen, stats, completed, total_steps, "期刊最新文章", "最新文章")
+                self._handle_batch(rss.papers, all_seen, stats, completed, total_steps, "顶级期刊", "最新文章")
 
             if self.sources.get("crossref"):
                 tasks: list[tuple[dict[str, Any], str, list[str]]] = []
@@ -602,17 +602,14 @@ class MainWindow(QMainWindow):
         self.daily_arxiv = QCheckBox("预印本（arXiv）")
         self.daily_arxiv.setToolTip("来自 arXiv，适合快速发现尚未正式发表的新论文。")
         self.daily_arxiv.setChecked(True)
-        self.daily_rss = QCheckBox("期刊最新文章")
-        self.daily_rss.setToolTip("从期刊提供的最新文章列表中查看近期更新，不等同于完整历史检索。")
-        self.daily_rss.setChecked(True)
-        self.daily_crossref = QCheckBox("顶级期刊近期检索")
-        self.daily_crossref.setToolTip("按当前研究方向关键词，在顶级期刊数据库中检索近期文章。")
-        self.daily_crossref.setChecked(False)
+        self.daily_top_journals = QCheckBox("顶级期刊")
+        self.daily_top_journals.setToolTip("同时检查顶级期刊最新文章，并按当前研究方向检索顶级期刊近期论文。")
+        self.daily_top_journals.setChecked(True)
         for label, widget in [("检索最近天数", self.daily_days), ("显示最低分", self.daily_min_score)]:
             row.addWidget(QLabel(label))
             row.addWidget(widget)
         row.addWidget(QLabel("检索数据源"))
-        for widget in [self.daily_arxiv, self.daily_rss, self.daily_crossref]:
+        for widget in [self.daily_arxiv, self.daily_top_journals]:
             row.addWidget(widget)
         row.addStretch(1)
         root.addWidget(settings)
@@ -687,20 +684,16 @@ class MainWindow(QMainWindow):
         source_row = QHBoxLayout(source_box)
         source_row.setContentsMargins(14, 18, 14, 14)
         source_row.setSpacing(10)
-        self.survey_crossref = QCheckBox("顶级期刊历史检索")
-        self.survey_crossref.setToolTip("按当前研究方向关键词，在配置的顶级期刊中做系统检索。")
-        self.survey_crossref.setChecked(True)
         self.survey_arxiv = QCheckBox("预印本（arXiv）")
         self.survey_arxiv.setToolTip("来自 arXiv；历史范围较长时可能较慢，如只做顶刊调研可不勾选。")
-        self.survey_rss = QCheckBox("期刊最新文章")
-        self.survey_rss.setToolTip("只适合补充最新文章动态，不适合作为完整历史调研来源。")
+        self.survey_top_journals = QCheckBox("顶级期刊")
+        self.survey_top_journals.setToolTip("同时检索顶级期刊历史论文，并补充期刊最新文章。")
+        self.survey_top_journals.setChecked(True)
         self.survey_ignore_cache = QCheckBox("忽略缓存，重新检索")
-        source_row.addWidget(self.survey_crossref)
         source_row.addWidget(self.survey_arxiv)
-        source_row.addWidget(self.survey_rss)
-        source_row.addWidget(QLabel("期刊集合：顶级期刊"))
-        source_row.addWidget(self.survey_ignore_cache)
+        source_row.addWidget(self.survey_top_journals)
         source_row.addStretch(1)
+        source_row.addWidget(self.survey_ignore_cache)
         root.addWidget(source_box)
 
         actions = QHBoxLayout()
@@ -902,7 +895,8 @@ class MainWindow(QMainWindow):
         self.daily_status_label.setText("正在检索")
         self.daily_run_btn.setEnabled(False)
         self.daily_stop_btn.setEnabled(True)
-        sources = {"arxiv": self.daily_arxiv.isChecked(), "rss": self.daily_rss.isChecked(), "crossref": self.daily_crossref.isChecked()}
+        top_journals_enabled = self.daily_top_journals.isChecked()
+        sources = {"arxiv": self.daily_arxiv.isChecked(), "rss": top_journals_enabled, "crossref": top_journals_enabled}
         self.daily_worker = DailyRadarWorker(int(self.daily_days.currentText()), sources, self.settings)
         self.daily_worker.finished_ok.connect(self.on_daily_finished)
         self.daily_worker.failed.connect(self.on_daily_failed)
@@ -934,10 +928,11 @@ class MainWindow(QMainWindow):
         if self.survey_worker and self.survey_worker.isRunning():
             return
         from_date, until_date = self._survey_dates()
-        sources = {"crossref": self.survey_crossref.isChecked(), "arxiv": self.survey_arxiv.isChecked(), "rss": self.survey_rss.isChecked()}
+        top_journals_enabled = self.survey_top_journals.isChecked()
+        sources = {"crossref": top_journals_enabled, "arxiv": self.survey_arxiv.isChecked(), "rss": top_journals_enabled}
         self.survey_progress.setValue(0)
         if sources.get("arxiv"):
-            self.survey_status.setText("正在启动；预印本历史检索可能较慢，如只需顶级期刊调研，可只选择“顶级期刊历史检索”。")
+            self.survey_status.setText("正在启动；预印本历史检索可能较慢，如只需顶级期刊调研，可只选择“顶级期刊”。")
         else:
             self.survey_status.setText("正在启动")
         self.survey_run_btn.setEnabled(False)
@@ -1022,36 +1017,32 @@ class MainWindow(QMainWindow):
         if mode == "daily":
             if self.daily_arxiv.isChecked():
                 selected_sources.append("预印本（arXiv）")
-            if self.daily_rss.isChecked():
-                selected_sources.append("期刊最新文章")
+            if self.daily_top_journals.isChecked():
+                selected_sources.append("顶级期刊")
                 journals.extend(
                     str(source.get("name"))
                     for source in sources.get("journal_sources", [])
                     if source.get("enabled") and source.get("name")
                 )
-            if self.daily_crossref.isChecked():
-                selected_sources.append("顶级期刊近期检索")
                 journals.extend(
                     str(source.get("name"))
                     for source in sources.get("top_journals", [])
                     if source.get("crossref_enabled") and source.get("name")
                 )
         else:
-            if self.survey_crossref.isChecked():
-                selected_sources.append("顶级期刊历史检索")
-                journals.extend(
-                    str(source.get("name"))
-                    for source in sources.get("top_journals", [])
-                    if source.get("crossref_enabled") and source.get("name")
-                )
             if self.survey_arxiv.isChecked():
                 selected_sources.append("预印本（arXiv）")
-            if self.survey_rss.isChecked():
-                selected_sources.append("期刊最新文章")
+            if self.survey_top_journals.isChecked():
+                selected_sources.append("顶级期刊")
                 journals.extend(
                     str(source.get("name"))
                     for source in sources.get("journal_sources", [])
                     if source.get("enabled") and source.get("name")
+                )
+                journals.extend(
+                    str(source.get("name"))
+                    for source in sources.get("top_journals", [])
+                    if source.get("crossref_enabled") and source.get("name")
                 )
 
         keywords = profile_to_keywords(profile)
@@ -1068,16 +1059,43 @@ class MainWindow(QMainWindow):
                 return empty
             shown = values[:limit]
             suffix = f"\n... 另有 {len(values) - limit} 项" if len(values) > limit else ""
-            return "\n".join(f"- {value}" for value in shown) + suffix
+            return "\n".join(str(value) for value in shown) + suffix
 
-        text = (
-            f"当前研究方向：{profile.get('display_name') or profile.get('profile_id') or '未命名'}\n\n"
-            f"已选择的数据来源：\n{block(selected_sources, '- 暂未选择数据来源')}\n\n"
-            f"会检索的期刊：\n{block(journals, '- 预印本（arXiv）不按期刊筛选；若未选择期刊来源，则不会显示期刊列表。')}\n\n"
-            f"用于远程检索的关键词/检索式：\n{block(queries, '- 当前 Profile 没有配置 search_queries')}\n\n"
-            f"用于本地判断相关性的关键词：\n{block(match_terms, '- 当前 Profile 没有配置 keyword_groups')}"
-        )
-        QMessageBox.information(self, "当前检索范围", text)
+        dialog = QDialog(self)
+        dialog.setWindowTitle("当前检索范围")
+        dialog.resize(980, 560)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
+        title = QLabel(f"当前研究方向：{profile.get('display_name') or profile.get('profile_id') or '未命名'}")
+        title.setObjectName("scopeTitle")
+        layout.addWidget(title)
+        columns = QHBoxLayout()
+        columns.setSpacing(12)
+        scope_data = [
+            ("数据来源", block(selected_sources, "暂未选择数据来源", 20)),
+            ("会检索的期刊", block(journals, "预印本（arXiv）不按期刊筛选；若未选择顶级期刊，则不会显示期刊列表。", 80)),
+            ("远程检索关键词", block(queries, "当前 Profile 没有配置 search_queries", 80)),
+            ("本地相关性关键词", block(match_terms, "当前 Profile 没有配置 keyword_groups", 120)),
+        ]
+        for heading, content_text in scope_data:
+            box = QGroupBox(heading)
+            box_layout = QVBoxLayout(box)
+            box_layout.setContentsMargins(10, 18, 10, 10)
+            text = QTextEdit()
+            text.setReadOnly(True)
+            text.setPlainText(content_text)
+            box_layout.addWidget(text)
+            columns.addWidget(box, 1)
+        layout.addLayout(columns)
+        close_btn = QPushButton("关闭")
+        self._style_button(close_btn)
+        close_btn.clicked.connect(dialog.accept)
+        footer = QHBoxLayout()
+        footer.addStretch(1)
+        footer.addWidget(close_btn)
+        layout.addLayout(footer)
+        dialog.exec()
 
     def _sync_survey_date_controls(self) -> None:
         custom = self.survey_range.currentText() == "自定义"
@@ -1503,7 +1521,7 @@ class MainWindow(QMainWindow):
             open_url(self.selected_paper.url)
 
     def _source_type_label(self, source_type: str) -> str:
-        return {"arxiv": "预印本（arXiv）", "journal_rss": "期刊最新文章", "crossref": "顶刊历史检索"}.get(source_type, source_type or "未知")
+        return {"arxiv": "预印本（arXiv）", "journal_rss": "顶级期刊", "crossref": "顶级期刊"}.get(source_type, source_type or "未知")
 
     def _setup_tray(self) -> None:
         if QSystemTrayIcon.isSystemTrayAvailable():

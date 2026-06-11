@@ -502,7 +502,7 @@ class MainWindow(QMainWindow):
     def __init__(self, first_run_needed: bool = False) -> None:
         super().__init__()
         self.setWindowTitle("PaperRadar / 文献雷达")
-        self.resize(1200, 780)
+        self.resize(1280, 820)
         if APP_ICON_PATH.exists():
             self.setWindowIcon(QIcon(str(APP_ICON_PATH)))
 
@@ -534,23 +534,51 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         self.setStyleSheet(self._style_sheet())
         self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
         self.tabs.addTab(self._build_daily_tab(), "每日雷达")
         self.tabs.addTab(self._build_survey_tab(), "历史调研")
         self.tabs.addTab(self._build_profile_tab(), "研究方向配置")
         self.setCentralWidget(self.tabs)
 
+    def _page_header(self, title_text: str, subtitle_text: str) -> QWidget:
+        header = QWidget()
+        header.setObjectName("pageHeader")
+        layout = QVBoxLayout(header)
+        layout.setContentsMargins(18, 14, 18, 14)
+        layout.setSpacing(4)
+        title = QLabel(title_text)
+        title.setObjectName("pageTitle")
+        subtitle = QLabel(subtitle_text)
+        subtitle.setObjectName("pageSubtitle")
+        subtitle.setWordWrap(True)
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+        return header
+
+    def _metric_label(self, text: str) -> QLabel:
+        label = QLabel(text)
+        label.setObjectName("metricCard")
+        label.setWordWrap(False)
+        return label
+
+    def _style_button(self, button: QPushButton, kind: str = "secondary") -> None:
+        button.setObjectName(f"{kind}Button")
+
     def _build_daily_tab(self) -> QWidget:
         page = QWidget()
         root = QVBoxLayout(page)
-        root.setContentsMargins(18, 14, 18, 14)
-        root.setSpacing(12)
+        root.setContentsMargins(22, 18, 22, 18)
+        root.setSpacing(14)
+        root.addWidget(self._page_header("每日雷达", "快速检查最近新文献，只展示命中当前研究方向且达到显示分数的结果。"))
 
         status = QGroupBox("状态")
         status_layout = QHBoxLayout(status)
-        self.daily_last_label = QLabel("上次检查：从未")
-        self.daily_found_label = QLabel("本次发现：0")
-        self.daily_high_label = QLabel("高相关：0")
-        self.daily_skim_label = QLabel("值得扫读：0")
+        status_layout.setContentsMargins(14, 18, 14, 14)
+        status_layout.setSpacing(8)
+        self.daily_last_label = self._metric_label("上次检查：从未")
+        self.daily_found_label = self._metric_label("本次发现：0")
+        self.daily_high_label = self._metric_label("高相关：0")
+        self.daily_skim_label = self._metric_label("值得扫读：0")
         self.daily_status_label = QLabel("就绪")
         self.daily_status_label.setObjectName("statusPill")
         for widget in [self.daily_last_label, self.daily_found_label, self.daily_high_label, self.daily_skim_label, self.daily_status_label]:
@@ -560,6 +588,8 @@ class MainWindow(QMainWindow):
 
         settings = QGroupBox("检索设置")
         row = QHBoxLayout(settings)
+        row.setContentsMargins(14, 18, 14, 14)
+        row.setSpacing(10)
         self.daily_days = QComboBox()
         self.daily_days.addItems(["1", "3", "7", "14", "30"])
         self.daily_days.setCurrentText(str(min(int(self.settings.get("days_back", 7)), 30)))
@@ -582,11 +612,16 @@ class MainWindow(QMainWindow):
         root.addWidget(settings)
 
         actions = QHBoxLayout()
+        actions.setSpacing(10)
         self.daily_run_btn = QPushButton("立即检查")
         self.daily_stop_btn = QPushButton("停止")
         self.daily_stop_btn.setEnabled(False)
         self.daily_report_btn = QPushButton("生成今日报告")
         self.daily_open_reports_btn = QPushButton("打开报告文件夹")
+        self._style_button(self.daily_run_btn, "primary")
+        self._style_button(self.daily_stop_btn, "danger")
+        self._style_button(self.daily_report_btn)
+        self._style_button(self.daily_open_reports_btn)
         for button in [self.daily_run_btn, self.daily_stop_btn, self.daily_report_btn, self.daily_open_reports_btn]:
             actions.addWidget(button)
         actions.addStretch(1)
@@ -606,11 +641,14 @@ class MainWindow(QMainWindow):
     def _build_survey_tab(self) -> QWidget:
         page = QWidget()
         root = QVBoxLayout(page)
-        root.setContentsMargins(18, 14, 18, 14)
-        root.setSpacing(12)
+        root.setContentsMargins(22, 18, 22, 18)
+        root.setSpacing(14)
+        root.addWidget(self._page_header("历史调研", "面向课题调研的长任务检索，支持缓存、进度追踪和分批展示结果。"))
 
         settings = QGroupBox("调研设置")
         row = QHBoxLayout(settings)
+        row.setContentsMargins(14, 18, 14, 14)
+        row.setSpacing(10)
         self.survey_name = QLineEdit("当前方向历史调研")
         self.survey_range = QComboBox()
         self.survey_range.addItems(["最近 90 天", "最近 365 天", "最近 3 年", "自定义"])
@@ -638,6 +676,8 @@ class MainWindow(QMainWindow):
 
         source_box = QGroupBox("检索数据源")
         source_row = QHBoxLayout(source_box)
+        source_row.setContentsMargins(14, 18, 14, 14)
+        source_row.setSpacing(10)
         self.survey_crossref = QCheckBox("Crossref 顶刊历史检索")
         self.survey_crossref.setChecked(True)
         self.survey_arxiv = QCheckBox("arXiv")
@@ -653,11 +693,16 @@ class MainWindow(QMainWindow):
         root.addWidget(source_box)
 
         actions = QHBoxLayout()
+        actions.setSpacing(10)
         self.survey_run_btn = QPushButton("开始调研")
         self.survey_stop_btn = QPushButton("停止")
         self.survey_stop_btn.setEnabled(False)
         self.survey_report_btn = QPushButton("生成调研报告")
         self.survey_open_reports_btn = QPushButton("打开报告文件夹")
+        self._style_button(self.survey_run_btn, "primary")
+        self._style_button(self.survey_stop_btn, "danger")
+        self._style_button(self.survey_report_btn)
+        self._style_button(self.survey_open_reports_btn)
         for button in [self.survey_run_btn, self.survey_stop_btn, self.survey_report_btn, self.survey_open_reports_btn]:
             actions.addWidget(button)
         actions.addStretch(1)
@@ -665,9 +710,13 @@ class MainWindow(QMainWindow):
 
         progress_box = QGroupBox("进度")
         progress_layout = QVBoxLayout(progress_box)
+        progress_layout.setContentsMargins(14, 18, 14, 14)
+        progress_layout.setSpacing(8)
         self.survey_progress = QProgressBar()
         self.survey_status = QLabel("就绪")
+        self.survey_status.setObjectName("progressStatus")
         self.survey_counts = QLabel("进度：0 / 0；已发现：0；去重后：0；命中：0；已显示：0；成功：0；失败：0；缓存：0；超时：0")
+        self.survey_counts.setObjectName("progressCounts")
         progress_layout.addWidget(self.survey_progress)
         progress_layout.addWidget(self.survey_status)
         progress_layout.addWidget(self.survey_counts)
@@ -689,12 +738,16 @@ class MainWindow(QMainWindow):
     def _build_profile_tab(self) -> QWidget:
         page = QWidget()
         root = QVBoxLayout(page)
-        root.setContentsMargins(18, 14, 18, 14)
-        root.setSpacing(12)
+        root.setContentsMargins(22, 18, 22, 18)
+        root.setSpacing(14)
+        root.addWidget(self._page_header("研究方向配置", "管理检索 Profile，生成给外部 AI 的提示词，并导入规范化后的研究方向配置。"))
 
         status = QGroupBox("当前 Profile")
         status_layout = QVBoxLayout(status)
+        status_layout.setContentsMargins(14, 18, 14, 14)
+        status_layout.setSpacing(10)
         self.profile_status_label = QLabel("")
+        self.profile_status_label.setObjectName("profileSummary")
         self.profile_status_label.setWordWrap(True)
         status_layout.addWidget(self.profile_status_label)
         status_actions = QHBoxLayout()
@@ -702,6 +755,10 @@ class MainWindow(QMainWindow):
         self.profile_copy_btn = QPushButton("复制当前 Profile")
         self.profile_export_btn = QPushButton("导出 Profile")
         self.profile_delete_btn = QPushButton("删除 Profile")
+        self._style_button(self.profile_set_active_btn, "primary")
+        self._style_button(self.profile_copy_btn)
+        self._style_button(self.profile_export_btn)
+        self._style_button(self.profile_delete_btn, "danger")
         for button in [self.profile_set_active_btn, self.profile_copy_btn, self.profile_export_btn, self.profile_delete_btn]:
             status_actions.addWidget(button)
         status_actions.addStretch(1)
@@ -713,16 +770,25 @@ class MainWindow(QMainWindow):
         self.profile_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.profile_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.profile_table.setAlternatingRowColors(True)
-        self.profile_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        profile_header = self.profile_table.horizontalHeader()
+        profile_header.setStretchLastSection(False)
+        for col in range(self.profile_table.columnCount()):
+            profile_header.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+        profile_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        for col, width in {0: 150, 1: 170, 3: 96, 4: 320, 5: 72}.items():
+            self.profile_table.setColumnWidth(col, width)
         self.profile_table.verticalHeader().setDefaultSectionSize(44)
         self.profile_table.setMinimumHeight(178)
         root.addWidget(self.profile_table)
 
         prompt_box = QGroupBox("AI 提示词生成")
         prompt_layout = QHBoxLayout(prompt_box)
+        prompt_layout.setContentsMargins(14, 18, 14, 14)
+        prompt_layout.setSpacing(10)
         self.profile_direction_input = QLineEdit()
         self.profile_direction_input.setPlaceholderText("输入研究方向，例如：超快光子学")
         self.profile_generate_prompt_btn = QPushButton("生成并复制 AI 提示词")
+        self._style_button(self.profile_generate_prompt_btn, "primary")
         prompt_layout.addWidget(QLabel("研究方向"))
         prompt_layout.addWidget(self.profile_direction_input)
         prompt_layout.addWidget(self.profile_generate_prompt_btn)
@@ -730,6 +796,8 @@ class MainWindow(QMainWindow):
 
         import_box = QGroupBox("Profile 粘贴导入")
         import_layout = QVBoxLayout(import_box)
+        import_layout.setContentsMargins(14, 18, 14, 14)
+        import_layout.setSpacing(10)
         self.profile_yaml_text = QTextEdit()
         self.profile_yaml_text.setPlaceholderText("在这里粘贴外部 AI 生成的 PaperRadar Profile YAML")
         import_layout.addWidget(self.profile_yaml_text)
@@ -737,11 +805,15 @@ class MainWindow(QMainWindow):
         self.profile_paste_btn = QPushButton("粘贴剪贴板内容")
         self.profile_validate_btn = QPushButton("智能解析并预览")
         self.profile_save_active_btn = QPushButton("保存并设为当前方向")
+        self._style_button(self.profile_paste_btn)
+        self._style_button(self.profile_validate_btn, "primary")
+        self._style_button(self.profile_save_active_btn, "primary")
         for button in [self.profile_paste_btn, self.profile_validate_btn, self.profile_save_active_btn]:
             import_actions.addWidget(button)
         import_actions.addStretch(1)
         import_layout.addLayout(import_actions)
         self.profile_validation_label = QLabel("尚未校验")
+        self.profile_validation_label.setObjectName("validationCard")
         self.profile_validation_label.setWordWrap(True)
         import_layout.addWidget(self.profile_validation_label)
         root.addWidget(import_box)
@@ -1354,45 +1426,314 @@ class MainWindow(QMainWindow):
     def _style_sheet(self) -> str:
         checkmark_path = str((APP_ICON_PATH.parent / "checkmark.svg").resolve()).replace("\\", "/")
         return """
-        QWidget { background: #f3f6fa; color: #263241; font-size: 13px; }
-        QTabWidget::pane, QGroupBox, QWidget#paperCard { background: #ffffff; border: 1px solid #d8e0ea; border-radius: 8px; }
-        QGroupBox { margin-top: 8px; font-weight: 700; }
-        QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; background: #ffffff; }
-        QPushButton { background: #2563eb; color: white; border: 1px solid #1d4ed8; border-radius: 8px; padding: 8px 14px; font-weight: 600; }
-        QPushButton:disabled { background: #e5e7eb; color: #94a3b8; border-color: #cbd5e1; }
-        QLineEdit, QSpinBox, QComboBox, QDateEdit { background: #ffffff; color: #263241; border: 1px solid #cbd5e1; border-radius: 7px; padding: 6px 8px; min-height: 22px; }
-        QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QDateEdit:focus { border-color: #60a5fa; }
+        QWidget { background: #f4f7fb; color: #172033; font-size: 13px; font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", Arial; }
+        QLabel { background: transparent; }
+        QWidget#pageHeader {
+            background: #ffffff;
+            border: 1px solid #d9e3ef;
+            border-radius: 12px;
+        }
+        QLabel#pageTitle {
+            color: #0f172a;
+            font-size: 22px;
+            font-weight: 800;
+        }
+        QLabel#pageSubtitle {
+            color: #64748b;
+            font-size: 13px;
+        }
+        QTabWidget::pane {
+            background: #f4f7fb;
+            border-top: 1px solid #dbe4f0;
+        }
+        QTabBar {
+            background: #eef4fb;
+        }
+        QTabBar::tab {
+            background: transparent;
+            color: #64748b;
+            padding: 10px 18px;
+            margin: 0 2px 0 0;
+            border: 0;
+            border-top-left-radius: 10px;
+            border-top-right-radius: 10px;
+            font-weight: 700;
+        }
+        QTabBar::tab:selected {
+            background: #ffffff;
+            color: #0f172a;
+            border: 1px solid #d9e3ef;
+            border-bottom: 1px solid #ffffff;
+        }
+        QTabBar::tab:hover:!selected {
+            background: #e7eef8;
+            color: #1e3a8a;
+        }
+        QGroupBox, QWidget#paperCard {
+            background: #ffffff;
+            border: 1px solid #d9e3ef;
+            border-radius: 12px;
+        }
+        QGroupBox {
+            margin-top: 14px;
+            color: #0f172a;
+            font-weight: 800;
+        }
+        QGroupBox::title {
+            subcontrol-origin: margin;
+            subcontrol-position: top left;
+            left: 14px;
+            padding: 0 8px;
+            background: #f4f7fb;
+            color: #0f172a;
+        }
+        QLabel#metricCard {
+            background: #f8fbff;
+            border: 1px solid #e2eaf5;
+            border-radius: 10px;
+            color: #334155;
+            padding: 8px 12px;
+            font-weight: 700;
+        }
+        QLabel#statusPill {
+            color: #1d4ed8;
+            background: #eaf2ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 14px;
+            padding: 7px 14px;
+            font-weight: 800;
+        }
+        QLabel#progressStatus {
+            color: #1e3a8a;
+            font-weight: 700;
+        }
+        QLabel#progressCounts, QLabel#profileSummary, QLabel#validationCard {
+            background: #f8fbff;
+            border: 1px solid #e2eaf5;
+            border-radius: 10px;
+            color: #334155;
+            padding: 10px 12px;
+        }
+        QPushButton {
+            background: #ffffff;
+            color: #1e3a8a;
+            border: 1px solid #c7d7ea;
+            border-radius: 10px;
+            padding: 9px 16px;
+            min-height: 24px;
+            font-weight: 800;
+        }
+        QPushButton:hover {
+            background: #f1f6ff;
+            border-color: #9db8dc;
+        }
+        QPushButton:pressed {
+            background: #e7effc;
+        }
+        QPushButton#primaryButton {
+            background: #2563eb;
+            color: #ffffff;
+            border: 1px solid #1d4ed8;
+        }
+        QPushButton#primaryButton:hover {
+            background: #1d4ed8;
+        }
+        QPushButton#dangerButton {
+            background: #ffffff;
+            color: #b91c1c;
+            border: 1px solid #fecaca;
+        }
+        QPushButton#dangerButton:hover {
+            background: #fff1f2;
+            border-color: #fca5a5;
+        }
+        QPushButton:disabled {
+            background: #edf2f7;
+            color: #94a3b8;
+            border-color: #d8e2ee;
+        }
+        QLineEdit, QSpinBox, QComboBox, QDateEdit {
+            background: #ffffff;
+            color: #172033;
+            border: 1px solid #cad8e8;
+            border-radius: 10px;
+            padding: 7px 10px;
+            min-height: 26px;
+            selection-background-color: #bfdbfe;
+        }
+        QLineEdit:hover, QSpinBox:hover, QComboBox:hover, QDateEdit:hover {
+            border-color: #9fb7d4;
+        }
+        QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QDateEdit:focus {
+            border: 1px solid #3b82f6;
+            background: #fbfdff;
+        }
         QSpinBox::up-button, QSpinBox::down-button { width: 0; border: 0; }
-        QComboBox { padding-right: 34px; }
-        QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: top right; width: 30px; border-left: 1px solid #dbe3ee; border-top-right-radius: 7px; border-bottom-right-radius: 7px; background: #f1f5f9; }
-        QComboBox::drop-down:hover { background: #e8f1ff; }
-        QComboBox::down-arrow { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid #475569; margin-right: 9px; }
-        QComboBox QAbstractItemView { background: #ffffff; color: #263241; border: 1px solid #cbd5e1; border-radius: 8px; padding: 4px; outline: 0; selection-background-color: #dbeafe; selection-color: #111827; }
-        QDateEdit::drop-down { subcontrol-origin: padding; subcontrol-position: top right; width: 30px; border-left: 1px solid #dbe3ee; border-top-right-radius: 7px; border-bottom-right-radius: 7px; background: #f1f5f9; }
-        QDateEdit::drop-down:hover { background: #e8f1ff; }
-        QDateEdit::down-arrow { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid #475569; margin-right: 9px; }
-        QCheckBox { spacing: 8px; }
-        QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px; border: 1px solid #cbd5e1; background: #ffffff; }
-        QCheckBox::indicator:checked { background: #2563eb; border-color: #1d4ed8; image: url("__CHECKMARK_PATH__"); }
-        QLabel#statusPill { color: #1d4ed8; background: #eaf2ff; border: 1px solid #bfdbfe; border-radius: 12px; padding: 5px 12px; font-weight: 600; }
-        QTableWidget { background: #ffffff; alternate-background-color: #f8fafc; gridline-color: #e5eaf0; border: 1px solid #d8e0ea; border-radius: 8px; selection-background-color: #dbeafe; }
-        QHeaderView::section { background: #eef3f8; color: #334155; border: 0; border-right: 1px solid #d8e0ea; border-bottom: 1px solid #d8e0ea; padding: 9px 8px; font-weight: 700; }
-        QScrollBar:vertical { background: #eef3f8; width: 12px; margin: 2px; border-radius: 6px; }
-        QScrollBar::handle:vertical { background: #c7d4e3; min-height: 32px; border-radius: 6px; }
-        QScrollBar::handle:vertical:hover { background: #93b3d8; }
+        QComboBox, QDateEdit { padding-right: 36px; }
+        QComboBox::drop-down, QDateEdit::drop-down {
+            subcontrol-origin: padding;
+            subcontrol-position: top right;
+            width: 32px;
+            border-left: 1px solid #e2e8f0;
+            border-top-right-radius: 10px;
+            border-bottom-right-radius: 10px;
+            background: #f8fafc;
+        }
+        QComboBox::drop-down:hover, QDateEdit::drop-down:hover {
+            background: #eef6ff;
+        }
+        QComboBox::down-arrow, QDateEdit::down-arrow {
+            width: 0;
+            height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 6px solid #475569;
+            margin-right: 10px;
+        }
+        QComboBox QAbstractItemView {
+            background: #ffffff;
+            color: #172033;
+            border: 1px solid #cbd5e1;
+            border-radius: 10px;
+            padding: 6px;
+            outline: 0;
+            selection-background-color: #dbeafe;
+            selection-color: #0f172a;
+        }
+        QCheckBox {
+            color: #334155;
+            spacing: 8px;
+            font-weight: 600;
+        }
+        QCheckBox::indicator {
+            width: 17px;
+            height: 17px;
+            border-radius: 5px;
+            border: 1px solid #b8c8dc;
+            background: #ffffff;
+        }
+        QCheckBox::indicator:hover {
+            border-color: #60a5fa;
+        }
+        QCheckBox::indicator:checked {
+            background: #2563eb;
+            border-color: #1d4ed8;
+            image: url("__CHECKMARK_PATH__");
+        }
+        QTableWidget {
+            background: #ffffff;
+            alternate-background-color: #f8fafc;
+            gridline-color: #e8eef6;
+            border: 1px solid #d9e3ef;
+            border-radius: 12px;
+            selection-background-color: #dbeafe;
+            selection-color: #0f172a;
+        }
+        QTableWidget::item {
+            padding: 8px;
+            border: 0;
+        }
+        QTableWidget::item:selected {
+            background: #dbeafe;
+            color: #0f172a;
+        }
+        QHeaderView::section {
+            background: #edf4fb;
+            color: #26364d;
+            border: 0;
+            border-right: 1px solid #d9e3ef;
+            border-bottom: 1px solid #d9e3ef;
+            padding: 11px 8px;
+            font-weight: 800;
+        }
+        QTableCornerButton::section {
+            background: #edf4fb;
+            border: 0;
+            border-bottom: 1px solid #d9e3ef;
+            border-right: 1px solid #d9e3ef;
+        }
+        QProgressBar {
+            background: #edf3f9;
+            border: 1px solid #d9e3ef;
+            border-radius: 9px;
+            height: 16px;
+            color: #334155;
+            text-align: center;
+            font-weight: 700;
+        }
+        QProgressBar::chunk {
+            background: #2563eb;
+            border-radius: 8px;
+        }
+        QSplitter::handle {
+            background: #e7edf5;
+            border-radius: 3px;
+            margin: 4px 0;
+        }
+        QSplitter::handle:hover {
+            background: #cbdcf0;
+        }
+        QScrollBar:vertical {
+            background: transparent;
+            width: 12px;
+            margin: 2px;
+        }
+        QScrollBar::handle:vertical {
+            background: #c6d4e5;
+            min-height: 34px;
+            border-radius: 6px;
+        }
+        QScrollBar::handle:vertical:hover { background: #8fb0d5; }
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; border: 0; background: transparent; }
         QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
-        QScrollBar:horizontal { background: #eef3f8; height: 12px; margin: 2px; border-radius: 6px; }
-        QScrollBar::handle:horizontal { background: #c7d4e3; min-width: 32px; border-radius: 6px; }
-        QScrollBar::handle:horizontal:hover { background: #93b3d8; }
+        QScrollBar:horizontal {
+            background: transparent;
+            height: 12px;
+            margin: 2px;
+        }
+        QScrollBar::handle:horizontal {
+            background: #c6d4e5;
+            min-width: 34px;
+            border-radius: 6px;
+        }
+        QScrollBar::handle:horizontal:hover { background: #8fb0d5; }
         QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; border: 0; background: transparent; }
         QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }
-        QLabel#paperTitle { color: #111827; font-size: 18px; font-weight: 700; }
-        QLabel#paperMeta { color: #64748b; }
-        QTextEdit { background: #ffffff; color: #263241; border: 1px solid #d8e0ea; border-radius: 8px; padding: 10px; }
-        QDialog#cellPopup { background: #ffffff; border: 1px solid #bfdbfe; border-radius: 12px; }
-        QLabel#cellPopupTitle { color: #1d4ed8; font-weight: 700; background: transparent; }
-        QDialog#cellPopup QTextEdit { background: #f8fafc; border: 1px solid #dbe3ee; border-radius: 8px; padding: 10px; }
+        QLabel#paperTitle {
+            color: #0f172a;
+            font-size: 18px;
+            font-weight: 800;
+        }
+        QLabel#paperMeta {
+            color: #52647a;
+            line-height: 1.4;
+        }
+        QTextEdit {
+            background: #ffffff;
+            color: #172033;
+            border: 1px solid #d9e3ef;
+            border-radius: 12px;
+            padding: 12px;
+        }
+        QTextEdit:focus {
+            border: 1px solid #93c5fd;
+        }
+        QDialog#cellPopup {
+            background: #ffffff;
+            border: 1px solid #bfdbfe;
+            border-radius: 14px;
+        }
+        QLabel#cellPopupTitle {
+            color: #1d4ed8;
+            font-weight: 800;
+            background: transparent;
+        }
+        QDialog#cellPopup QTextEdit {
+            background: #f8fbff;
+            border: 1px solid #dbeafe;
+            border-radius: 10px;
+            padding: 10px;
+        }
         """.replace("__CHECKMARK_PATH__", checkmark_path)
 
 

@@ -1,45 +1,23 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from pathlib import Path
-import sys
-from PyInstaller.utils.hooks import collect_all
 
 
 project_dir = Path.cwd()
-pyside6_datas, pyside6_binaries, pyside6_hiddenimports = collect_all("PySide6")
-shiboken6_datas, shiboken6_binaries, shiboken6_hiddenimports = collect_all("shiboken6")
-library_bin = Path(sys.prefix) / "Library" / "bin"
-conda_qt_binaries = []
-if library_bin.exists():
-    for pattern in (
-        "pyside6*.dll",
-        "shiboken6*.dll",
-        "Qt6*.dll",
-        "icu*.dll",
-        "MSVCP140*.dll",
-        "VCRUNTIME140*.dll",
-        "zlib*.dll",
-        "libpng*.dll",
-        "freetype*.dll",
-        "harfbuzz*.dll",
-        "brotli*.dll",
-        "bz2*.dll",
-    ):
-        conda_qt_binaries.extend((str(path), ".") for path in library_bin.glob(pattern))
 
 a = Analysis(
     ["run.py"],
     pathex=[str(project_dir)],
-    binaries=pyside6_binaries + shiboken6_binaries + conda_qt_binaries,
+    binaries=[],
     datas=[
         ("assets", "assets"),
         ("resources", "resources"),
-    ] + pyside6_datas + shiboken6_datas,
-    hiddenimports=pyside6_hiddenimports + shiboken6_hiddenimports,
+    ],
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=["packaging/pyside6_dll_path.py"],
-    excludes=[],
+    runtime_hooks=[],
+    excludes=["PySide6", "shiboken6"],
     noarchive=False,
     optimize=0,
 )

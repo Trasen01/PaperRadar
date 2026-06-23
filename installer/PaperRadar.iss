@@ -1,8 +1,8 @@
-#define MyAppName "PaperRadar"
-#define MyAppVersion "0.2.1"
-#define MyAppPublisher "PaperRadar Project"
+﻿#define MyAppName "PaperRadar"
+#define MyAppVersion "0.2.2"
+#define MyAppPublisher "PaperRadar 项目"
 #define MyAppExeName "PaperRadar.exe"
-#define MyAppId "{{1F0CB35D-5B7B-45D1-9B31-202602000001}"
+#define MyAppId "{{1F0CB35D-5B7B-45D1-9B31-202602000001}}"
 
 [Setup]
 AppId={#MyAppId}
@@ -26,10 +26,10 @@ CloseApplications=yes
 RestartApplications=no
 
 [Languages]
-Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "chinesesimplified"; MessagesFile: "ChineseSimplified.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加快捷方式："; Flags: unchecked
 
 [Files]
 Source: "..\dist\PaperRadar\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -39,8 +39,8 @@ Name: "{group}\PaperRadar"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app
 Name: "{autodesktop}\PaperRadar"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch PaperRadar"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "启动 PaperRadar"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-; Program files are removed by the uninstaller automatically.
-; User data is intentionally kept in %APPDATA%\PaperRadar and is never deleted here.
+; 程序文件会由卸载程序自动移除。
+; 用户数据会保留在 %APPDATA%\PaperRadar，此处不会删除。

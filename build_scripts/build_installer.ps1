@@ -12,7 +12,21 @@ if (-not (Test-Path "dist\PaperRadar\PaperRadar.exe")) {
 }
 
 if (-not (Test-Path $InnoSetupCompiler)) {
-    throw "Inno Setup compiler not found: $InnoSetupCompiler. Install Inno Setup 6 or pass -InnoSetupCompiler."
+    $candidates = @(
+        (Get-Command "ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1),
+        "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+        "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+        "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+    ) | Where-Object { $_ -and (Test-Path $_) }
+
+    $candidates = @($candidates)
+    if ($candidates.Count -gt 0) {
+        $InnoSetupCompiler = $candidates[0]
+    }
+}
+
+if (-not (Test-Path $InnoSetupCompiler)) {
+    throw "Inno Setup compiler not found. Install Inno Setup 6 or pass -InnoSetupCompiler."
 }
 
 New-Item -ItemType Directory -Force -Path "dist\installer" | Out-Null

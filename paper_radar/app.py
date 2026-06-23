@@ -1,17 +1,42 @@
 from __future__ import annotations
 
-import sys
-
-from PySide6.QtCore import QLockFile
-from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication, QMessageBox
+import logging
+import msvcrt
+from pathlib import Path
+from tkinter import messagebox
 
 from .cache_manager import enforce_cache_limit
-from .main_window import MainWindow
 from .profile_manager import initialize_profile_system
 from .settings import load_settings
-from .utils import APP_ICON_PATH, USER_DATA_DIR, ensure_directories, migrate_legacy_data_if_needed, setup_logging
-from .version import __version__
+from .tk_window import MainWindow
+from .utils import USER_DATA_DIR, ensure_directories, migrate_legacy_data_if_needed, setup_logging
+
+
+class SingleInstanceLock:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.handle = None
+
+    def acquire(self) -> bool:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.handle = self.path.open("a+b")
+        try:
+            msvcrt.locking(self.handle.fileno(), msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            self.handle.close()
+            self.handle = None
+            return False
+
+    def release(self) -> None:
+        if not self.handle:
+            return
+        try:
+            self.handle.seek(0)
+            msvcrt.locking(self.handle.fileno(), msvcrt.LK_UNLCK, 1)
+        finally:
+            self.handle.close()
+            self.handle = None
 
 
 def main() -> int:
@@ -24,22 +49,17 @@ def main() -> int:
         if cache_settings.get("enabled", True):
             enforce_cache_limit(float(cache_settings.get("max_size_gb", 10)))
     except Exception:
-        import logging
-
         logging.getLogger(__name__).warning("Cache cleanup failed during startup", exc_info=True)
-    first_run_needed = initialize_profile_system()
-    app = QApplication(sys.argv)
-    app.setApplicationName("PaperRadar")
-    app.setApplicationDisplayName("PaperRadar")
-    app.setApplicationVersion(__version__)
-    if APP_ICON_PATH.exists():
-        app.setWindowIcon(QIcon(str(APP_ICON_PATH)))
-    lock = QLockFile(str(USER_DATA_DIR / "PaperRadar.lock"))
-    if not lock.tryLock(100):
-        QMessageBox.information(None, "PaperRadar", "PaperRadar 已在运行。")
+
+    lock = SingleInstanceLock(USER_DATA_DIR / "PaperRadar.lock")
+    if not lock.acquire():
+        messagebox.showinfo("PaperRadar", "PaperRadar 已在运行。")
         return 0
-    app._single_instance_lock = lock  # Keep the lock alive for the process lifetime.
-    app.setQuitOnLastWindowClosed(True)
+
+    first_run_needed = initialize_profile_system()
     window = MainWindow(first_run_needed=first_run_needed)
-    window.show()
-    return app.exec()
+    try:
+        window.mainloop()
+    finally:
+        lock.release()
+    return 0

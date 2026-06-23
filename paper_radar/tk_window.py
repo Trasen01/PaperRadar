@@ -504,35 +504,20 @@ class MainWindow(tk.Tk):
         if first_run_needed:
             self.after(300, self.show_first_run_wizard)
 
-    def _palette(self, mode: str) -> dict[str, str]:
-        if mode == "dark":
-            return {
-                "bg": "#121b2b",
-                "surface": "#18243a",
-                "surface2": "#21304a",
-                "text": "#eef5ff",
-                "muted": "#b8c7da",
-                "border": "#3a506d",
-                "primary": "#4b8ff7",
-                "primary_hover": "#3478df",
-                "accent": "#d97706",
-                "danger": "#ef4444",
-                "success": "#22c55e",
-                "table_alt": "#1c2a42",
-            }
+    def _palette(self, mode: str = "dark") -> dict[str, str]:
         return {
-            "bg": "#f3f6fa",
-            "surface": "#ffffff",
-            "surface2": "#eef4fb",
-            "text": "#172231",
-            "muted": "#435a73",
-            "border": "#cddbea",
-            "primary": "#0f62b7",
-            "primary_hover": "#0b4f95",
-            "accent": "#0f766e",
-            "danger": "#c2413b",
-            "success": "#047857",
-            "table_alt": "#f7fafd",
+            "bg": "#172338",
+            "surface": "#1d2c45",
+            "surface2": "#263956",
+            "text": "#f4f7fb",
+            "muted": "#bdcbe0",
+            "border": "#4a6384",
+            "primary": "#5a9cff",
+            "primary_hover": "#4388ef",
+            "accent": "#3dd6c6",
+            "danger": "#ff6b7a",
+            "success": "#4ade80",
+            "table_alt": "#22324d",
         }
 
     def _build_ui(self) -> None:
@@ -555,20 +540,6 @@ class MainWindow(tk.Tk):
         self.nav_buttons: dict[str, tk.Button] = {}
         for key, label in [("daily", "每日雷达"), ("survey", "历史调研"), ("profile", "研究方向")]:
             self.nav_buttons[key] = self._nav_button(self.nav_frame, key, label)
-
-        self.theme_var = tk.StringVar(value="深色模式")
-        self.theme_button = tk.Button(
-            self.appbar,
-            text="深色模式",
-            bd=0,
-            padx=14,
-            pady=8,
-            cursor="hand2",
-            font=("Microsoft YaHei UI", 9, "bold"),
-            command=self._toggle_theme_mode,
-        )
-        self.theme_button.pack(side="right", padx=(0, 30), pady=16)
-        self._style_plain_button(self.theme_button)
 
         self.content = ttk.Frame(self, style="Page.TFrame")
         self.content.pack(fill="both", expand=True)
@@ -608,7 +579,7 @@ class MainWindow(tk.Tk):
         return button
 
     def _style_plain_button(self, button: tk.Button, selected: bool = False) -> None:
-        hover_bg = "#e7f0fb" if self.theme_mode == "light" else "#22304a"
+        hover_bg = "#2a3d5e"
         button.configure(
             bg=self.colors["primary"] if selected else self.colors["surface"],
             fg="#ffffff" if selected else self.colors["text"],
@@ -619,10 +590,6 @@ class MainWindow(tk.Tk):
             highlightcolor=self.colors["primary"],
             relief="flat",
         )
-
-    def _toggle_theme_mode(self) -> None:
-        self.theme_var.set("深色模式" if self.theme_mode == "light" else "浅色模式")
-        self._switch_theme()
 
     def _cycle_value(self, var: tk.StringVar, values: list[str]) -> None:
         if not values:
@@ -656,11 +623,11 @@ class MainWindow(tk.Tk):
         self.style.configure("Body.TLabel", background=colors["surface"], foreground=colors["text"])
         self.style.configure("Metric.TLabel", background=colors["surface2"], foreground=colors["text"], padding=(12, 9), font=("Microsoft YaHei UI", 10, "bold"))
         self.style.configure("Primary.TButton", background=colors["primary"], foreground="#ffffff", padding=(16, 10), font=("Microsoft YaHei UI", 10, "bold"), relief="flat", borderwidth=0)
-        self.style.map("Primary.TButton", background=[("active", colors["primary_hover"]), ("disabled", "#d7e2f1" if self.theme_mode == "light" else "#263855")], foreground=[("disabled", "#7b8da6")])
+        self.style.map("Primary.TButton", background=[("active", colors["primary_hover"]), ("disabled", "#30435f")], foreground=[("disabled", "#9aabc1")])
         self.style.configure("Danger.TButton", background=colors["surface2"], foreground=colors["danger"], padding=(16, 10), font=("Microsoft YaHei UI", 10, "bold"), relief="flat", borderwidth=0)
-        self.style.map("Danger.TButton", background=[("active", "#fee2e2" if self.theme_mode == "light" else "#3b1820"), ("disabled", "#eef3f9" if self.theme_mode == "light" else "#172238")], foreground=[("disabled", "#9aa8bb")])
+        self.style.map("Danger.TButton", background=[("active", "#4a2230"), ("disabled", "#22324d")], foreground=[("disabled", "#9aa8bb")])
         self.style.configure("Secondary.TButton", background=colors["surface2"], foreground=colors["primary"], padding=(16, 10), font=("Microsoft YaHei UI", 10, "bold"), relief="flat", borderwidth=0)
-        self.style.map("Secondary.TButton", background=[("active", "#e6f0fb" if self.theme_mode == "light" else "#22304a")])
+        self.style.map("Secondary.TButton", background=[("active", "#2a3d5e")])
         self.style.configure("TCheckbutton", background=colors["surface"], foreground=colors["text"], indicatorcolor=colors["surface"], indicatordiameter=14, padding=(8, 5))
         self.style.map(
             "TCheckbutton",
@@ -671,12 +638,12 @@ class MainWindow(tk.Tk):
         self.style.configure("TEntry", fieldbackground=colors["surface"], foreground=colors["text"], bordercolor=colors["border"], lightcolor=colors["border"], darkcolor=colors["border"], padding=(12, 9), insertcolor=colors["text"])
         self.style.configure("TSpinbox", fieldbackground=colors["surface"], foreground=colors["text"], bordercolor=colors["border"], lightcolor=colors["border"], darkcolor=colors["border"], arrowsize=0, padding=(10, 7))
         self.style.configure("Treeview", background=colors["surface"], fieldbackground=colors["surface"], foreground=colors["text"], rowheight=38, borderwidth=0, relief="flat", bordercolor=colors["surface"], lightcolor=colors["surface"], darkcolor=colors["surface"], font=("Microsoft YaHei UI", 10))
-        self.style.map("Treeview", background=[("selected", "#d8eaff" if self.theme_mode == "light" else "#1d4ed8")], foreground=[("selected", colors["text"] if self.theme_mode == "light" else "#ffffff")])
-        self.style.configure("Treeview.Heading", background="#edf3fa" if self.theme_mode == "light" else "#18243a", foreground=colors["muted"], padding=(12, 10), font=("Microsoft YaHei UI", 10, "bold"), relief="flat", borderwidth=0, bordercolor=colors["surface"], lightcolor=colors["surface"], darkcolor=colors["surface"])
+        self.style.map("Treeview", background=[("selected", "#2f6fd6")], foreground=[("selected", "#ffffff")])
+        self.style.configure("Treeview.Heading", background=colors["surface2"], foreground=colors["muted"], padding=(12, 10), font=("Microsoft YaHei UI", 10, "bold"), relief="flat", borderwidth=0, bordercolor=colors["surface"], lightcolor=colors["surface"], darkcolor=colors["surface"])
         self.style.layout("Vertical.TScrollbar", [("Vertical.Scrollbar.trough", {"sticky": "ns", "children": [("Vertical.Scrollbar.thumb", {"expand": "1", "sticky": "nswe"})]})])
         self.style.layout("Horizontal.TScrollbar", [("Horizontal.Scrollbar.trough", {"sticky": "ew", "children": [("Horizontal.Scrollbar.thumb", {"expand": "1", "sticky": "nswe"})]})])
-        self.style.configure("Vertical.TScrollbar", background="#6f8297" if self.theme_mode == "light" else "#3f5678", troughcolor=colors["bg"], bordercolor=colors["bg"], arrowcolor=colors["bg"], relief="flat", width=10, arrowsize=1, gripcount=0)
-        self.style.configure("Horizontal.TScrollbar", background="#6f8297" if self.theme_mode == "light" else "#3f5678", troughcolor=colors["bg"], bordercolor=colors["bg"], arrowcolor=colors["bg"], relief="flat", width=10, arrowsize=1, gripcount=0)
+        self.style.configure("Vertical.TScrollbar", background="#526d92", troughcolor=colors["bg"], bordercolor=colors["bg"], arrowcolor=colors["bg"], relief="flat", width=10, arrowsize=1, gripcount=0)
+        self.style.configure("Horizontal.TScrollbar", background="#526d92", troughcolor=colors["bg"], bordercolor=colors["bg"], arrowcolor=colors["bg"], relief="flat", width=10, arrowsize=1, gripcount=0)
         self.style.map("Vertical.TScrollbar", background=[("active", colors["border"])])
         self.style.map("Horizontal.TScrollbar", background=[("active", colors["border"])])
         self.style.configure("Horizontal.TProgressbar", background=colors["primary"], troughcolor=colors["surface2"], bordercolor=colors["surface2"], lightcolor=colors["primary"], darkcolor=colors["primary"])
@@ -688,8 +655,8 @@ class MainWindow(tk.Tk):
             bg=self.colors["surface"],
             fg=self.colors["text"],
             insertbackground=self.colors["text"],
-            selectbackground="#bfdbfe" if self.theme_mode == "light" else "#1e3a8a",
-            selectforeground=self.colors["text"] if self.theme_mode == "light" else "#ffffff",
+            selectbackground="#2f6fd6",
+            selectforeground="#ffffff",
             relief="flat",
             bd=0,
             padx=12,
@@ -1114,7 +1081,6 @@ class MainWindow(tk.Tk):
             "title": "标题",
             "authors": "作者",
             "date": "发布日期",
-            "category": "分类/DOI",
             "keywords": "命中关键词",
             "link": "链接",
         }
@@ -1130,8 +1096,8 @@ class MainWindow(tk.Tk):
         table_card.rowconfigure(0, weight=1)
         table_card.columnconfigure(0, weight=1)
         tree.tag_configure("odd", background=self.colors["table_alt"])
-        tree.tag_configure("high", background="#e4efff" if self.theme_mode == "light" else "#1e3a8a")
-        tree.tag_configure("skim", background="#e6f7f4" if self.theme_mode == "light" else "#174a5e")
+        tree.tag_configure("high", background="#28569f")
+        tree.tag_configure("skim", background="#1d5d73")
         tree.bind("<<TreeviewSelect>>", lambda _event, t=tree, p=prefix: self._select_result(t, p))
         tree.bind("<ButtonRelease-1>", lambda event, t=tree: self._open_tree_link_on_click(event, t), add="+")
         tree.bind("<Double-1>", lambda _event, t=tree: self._open_selected_tree_link(t))
@@ -1388,7 +1354,6 @@ class MainWindow(tk.Tk):
                 paper.title,
                 paper.authors,
                 format_date_only(paper.published_date),
-                paper.doi or paper.primary_category_text or "期刊论文",
                 paper.matched_keywords_text,
                 paper.url or "无链接",
             )
@@ -1586,7 +1551,7 @@ class MainWindow(tk.Tk):
             self.profile_status_var.set("当前没有激活的研究方向。请导入或创建一个 Profile 后设为当前方向。")
         for item in self.profile_tree.get_children():
             self.profile_tree.delete(item)
-        self.profile_tree.tag_configure("active", background="#dbeafe" if self.theme_mode == "light" else "#1d4ed8", foreground=self.colors["text"] if self.theme_mode == "light" else "#ffffff")
+        self.profile_tree.tag_configure("active", background="#2f6fd6", foreground="#ffffff")
         active_iid = ""
         for row, profile in enumerate(load_all_profiles()):
             groups = profile.get("keyword_groups") or {}
@@ -1940,14 +1905,12 @@ class MainWindow(tk.Tk):
         return {"arxiv": "预印本（arXiv）", "journal_rss": "顶级期刊", "crossref": "顶级期刊"}.get(source_type, source_type or "未知")
 
     def _switch_theme(self) -> None:
-        self.theme_mode = "dark" if self.theme_var.get() == "深色模式" else "light"
-        self.colors = self._palette(self.theme_mode)
+        self.theme_mode = "dark"
+        self.colors = self._palette("dark")
         self._configure_styles()
         self.configure(bg=self.colors["bg"])
         self.logo_canvas.configure(bg=self.colors["surface"])
         self._draw_logo(self.logo_canvas)
-        self.theme_button.configure(text=self.theme_var.get())
-        self._style_plain_button(self.theme_button)
         for button in getattr(self, "choice_buttons", []):
             self._style_plain_button(button)
         for button, var, label in getattr(self, "check_buttons", []):

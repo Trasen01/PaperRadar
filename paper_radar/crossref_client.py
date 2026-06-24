@@ -103,6 +103,29 @@ class CrossrefClient:
         start = until - timedelta(days=max(days_back, 0))
         return self.fetch(start, until, build_search_queries_from_keywords(load_keywords(), max_queries=max_queries))
 
+    def fetch_journal_works(self, journal_name: str, issns: list[str], query: str, from_date: date, until_date: date) -> CrossrefResult:
+        journal = {"name": journal_name, "issn": issns, "crossref_enabled": True, "quality_score": 8}
+        stat = CrossrefQueryStat(journal=journal_name or "Unknown", query=query)
+        try:
+            items = self._query(journal, issns, query, from_date, until_date)
+            stat.raw_count = len(items)
+            papers: list[Paper] = []
+            for item in items:
+                paper = self._item_to_paper(journal, item)
+                if not paper.title:
+                    continue
+                stat.parsed_count += 1
+                if paper.abstract:
+                    stat.abstract_count += 1
+                if paper.doi:
+                    stat.doi_count += 1
+                papers.append(paper)
+            return CrossrefResult(papers=self._dedupe(papers), query_stats=[stat], failed_requests=[])
+        except Exception as exc:
+            stat.error = str(exc)
+            logger.warning("CROSSREF_JOURNAL_QUERY_FAILED journal=%s query=%s error=%s", journal_name, query, exc)
+            return CrossrefResult(papers=[], query_stats=[stat], failed_requests=[f"{journal_name} | {query}: {exc}"])
+
     def fetch(self, from_date: date, until_date: date, queries: list[str]) -> CrossrefResult:
         sources = load_sources().get("top_journals", [])
         enabled = [source for source in sources if source.get("crossref_enabled")]

@@ -469,8 +469,7 @@ class MainWindow(tk.Tk):
         enable_windows_high_dpi()
         super().__init__()
         self.title("PaperRadar")
-        self.geometry("1640x980")
-        self.minsize(1280, 820)
+        self._apply_responsive_window_size()
         try:
             self.tk.call("tk", "scaling", max(1.15, self.winfo_fpixels("1i") / 72))
         except tk.TclError:
@@ -503,6 +502,18 @@ class MainWindow(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.exit_app)
         if first_run_needed:
             self.after(300, self.show_first_run_wizard)
+
+    def _apply_responsive_window_size(self) -> None:
+        screen_w = max(self.winfo_screenwidth(), 1024)
+        screen_h = max(self.winfo_screenheight(), 720)
+        width = min(1640, max(1080, screen_w - 80))
+        height = min(980, max(680, screen_h - 90))
+        min_w = min(1180, max(980, screen_w - 160))
+        min_h = min(760, max(620, screen_h - 160))
+        x = max(0, (screen_w - width) // 2)
+        y = max(0, (screen_h - height) // 2)
+        self.geometry(f"{width}x{height}+{x}+{y}")
+        self.minsize(min_w, min_h)
 
     def _palette(self, mode: str = "dark") -> dict[str, str]:
         return {
@@ -642,10 +653,10 @@ class MainWindow(tk.Tk):
         self.style.configure("Treeview.Heading", background=colors["surface2"], foreground=colors["muted"], padding=(12, 10), font=("Microsoft YaHei UI", 10, "bold"), relief="flat", borderwidth=0, bordercolor=colors["surface"], lightcolor=colors["surface"], darkcolor=colors["surface"])
         self.style.layout("Vertical.TScrollbar", [("Vertical.Scrollbar.trough", {"sticky": "ns", "children": [("Vertical.Scrollbar.thumb", {"expand": "1", "sticky": "nswe"})]})])
         self.style.layout("Horizontal.TScrollbar", [("Horizontal.Scrollbar.trough", {"sticky": "ew", "children": [("Horizontal.Scrollbar.thumb", {"expand": "1", "sticky": "nswe"})]})])
-        self.style.configure("Vertical.TScrollbar", background="#526d92", troughcolor=colors["bg"], bordercolor=colors["bg"], arrowcolor=colors["bg"], relief="flat", width=10, arrowsize=1, gripcount=0)
-        self.style.configure("Horizontal.TScrollbar", background="#526d92", troughcolor=colors["bg"], bordercolor=colors["bg"], arrowcolor=colors["bg"], relief="flat", width=10, arrowsize=1, gripcount=0)
-        self.style.map("Vertical.TScrollbar", background=[("active", colors["border"])])
-        self.style.map("Horizontal.TScrollbar", background=[("active", colors["border"])])
+        self.style.configure("Vertical.TScrollbar", background="#6b86ad", troughcolor=colors["surface"], bordercolor=colors["surface"], arrowcolor=colors["surface"], relief="flat", width=13, arrowsize=1, gripcount=0)
+        self.style.configure("Horizontal.TScrollbar", background="#6b86ad", troughcolor=colors["surface"], bordercolor=colors["surface"], arrowcolor=colors["surface"], relief="flat", width=13, arrowsize=1, gripcount=0)
+        self.style.map("Vertical.TScrollbar", background=[("active", colors["primary"])])
+        self.style.map("Horizontal.TScrollbar", background=[("active", colors["primary"])])
         self.style.configure("Horizontal.TProgressbar", background=colors["primary"], troughcolor=colors["surface2"], bordercolor=colors["surface2"], lightcolor=colors["primary"], darkcolor=colors["primary"])
 
     def _style_text_widget(self, widget: tk.Text | scrolledtext.ScrolledText | None) -> None:
@@ -746,7 +757,7 @@ class MainWindow(tk.Tk):
         body.pack(fill="both", expand=True)
         controls_shell, controls = self._scrollable_panel(body)
         results = ttk.Frame(body, style="Page.TFrame")
-        body.columnconfigure(0, minsize=520, weight=0)
+        body.columnconfigure(0, minsize=360, weight=0)
         body.columnconfigure(1, weight=1)
         body.rowconfigure(0, weight=1)
         controls_shell.grid(row=0, column=0, sticky="nsew")
@@ -811,6 +822,7 @@ class MainWindow(tk.Tk):
         self.daily_progress_var = tk.StringVar(value="就绪")
         ttk.Label(progress, textvariable=self.daily_progress_var, style="Metric.TLabel", wraplength=430).pack(fill="x", pady=(8, 0))
 
+        self._research_focus_strip(results, "daily")
         self._build_result_tools(results, "daily")
         self.daily_tree, self.daily_detail_text = self._build_results_area(results, "daily")
 
@@ -819,7 +831,7 @@ class MainWindow(tk.Tk):
         body.pack(fill="both", expand=True)
         controls_shell, controls = self._scrollable_panel(body)
         results = ttk.Frame(body, style="Page.TFrame")
-        body.columnconfigure(0, minsize=520, weight=0)
+        body.columnconfigure(0, minsize=360, weight=0)
         body.columnconfigure(1, weight=1)
         body.rowconfigure(0, weight=1)
         controls_shell.grid(row=0, column=0, sticky="nsew")
@@ -878,8 +890,21 @@ class MainWindow(tk.Tk):
         ttk.Label(progress, textvariable=self.survey_status_var, style="Metric.TLabel", wraplength=430).pack(fill="x", pady=(8, 4))
         ttk.Label(progress, textvariable=self.survey_counts_var, style="Metric.TLabel", wraplength=430).pack(fill="x")
 
+        self._research_focus_strip(results, "survey")
         self._build_result_tools(results, "survey")
         self.survey_tree, self.survey_detail_text = self._build_results_area(results, "survey")
+
+    def _research_focus_strip(self, parent: ttk.Frame, prefix: str) -> None:
+        title = "??????" if prefix == "daily" else "??????"
+        message = (
+            "????????????????????????"
+            if prefix == "daily"
+            else "?????????????????????????????"
+        )
+        strip = ttk.Frame(parent, style="Card.TFrame", padding=(16, 10))
+        strip.pack(fill="x", padx=18, pady=(10, 4))
+        ttk.Label(strip, text=title, style="Body.TLabel", font=("Microsoft YaHei UI", 11, "bold")).pack(side="left", padx=(0, 14))
+        ttk.Label(strip, text=message, style="Muted.TLabel", wraplength=760).pack(side="left", fill="x", expand=True)
 
     def _build_profile_tab(self) -> None:
         self._page_header(self.profile_tab, "研究方向配置", "管理检索 Profile，生成外部 AI 提示词，并导入规范化后的研究方向配置。")
@@ -1084,16 +1109,19 @@ class MainWindow(tk.Tk):
             "keywords": "命中关键词",
             "link": "链接",
         }
-        widths = {"score": 66, "source": 108, "type": 108, "title": 410, "authors": 210, "date": 112, "keywords": 210, "link": 260}
+        widths = {"score": 72, "source": 132, "type": 118, "title": 460, "authors": 240, "date": 122, "keywords": 240, "link": 320}
         for col in RESULT_COLUMNS:
             tree.heading(col, text=headings[col], command=lambda c=col: self._sort_tree(tree, c, False))
             anchor = "w" if col in {"title", "authors", "keywords", "link"} else "center"
-            tree.column(col, width=widths[col], minwidth=120 if col == "link" else 60, anchor=anchor, stretch=True)
+            tree.column(col, width=widths[col], minwidth=120 if col == "link" else 64, anchor=anchor, stretch=False)
         yscroll = ttk.Scrollbar(table_card, orient="vertical", style="Vertical.TScrollbar", command=tree.yview)
-        tree.configure(yscrollcommand=yscroll.set)
+        xscroll = ttk.Scrollbar(table_card, orient="horizontal", style="Horizontal.TScrollbar", command=tree.xview)
+        tree.configure(yscrollcommand=yscroll.set, xscrollcommand=xscroll.set)
         tree.grid(row=0, column=0, sticky="nsew")
-        yscroll.grid(row=0, column=1, sticky="ns")
+        yscroll.grid(row=0, column=1, sticky="ns", padx=(6, 0))
+        xscroll.grid(row=1, column=0, sticky="ew", pady=(6, 0))
         table_card.rowconfigure(0, weight=1)
+        table_card.rowconfigure(1, weight=0)
         table_card.columnconfigure(0, weight=1)
         tree.tag_configure("odd", background=self.colors["table_alt"])
         tree.tag_configure("high", background="#28569f")

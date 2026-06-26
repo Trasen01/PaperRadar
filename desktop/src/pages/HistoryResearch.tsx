@@ -98,7 +98,7 @@ export function HistoryResearch() {
   const checkService = async () => {
     if (mockMode) return true;
     try {
-      await waitForLocalService();
+      await waitForLocalService({ restart: state === "service_unavailable" });
       if (state === "service_unavailable") setState("idle");
       setLastErrorDetail(null);
       setToast({ title: "文献检索服务已就绪", description: "现在可以开始历史调研。", type: "success" });

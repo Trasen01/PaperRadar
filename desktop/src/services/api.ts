@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import type { Paper } from "../types/paper";
 import type { ResearchProfile } from "../types/profile";
 import type { PaperSummary } from "../types/summary";
@@ -81,16 +82,27 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   }
 }
 
+async function invokeDesktopCommand(command: "ensure_local_service" | "restart_local_service") {
+  if (RUNTIME_MODE === "mock") return;
+  try {
+    await invoke(command);
+  } catch (error) {
+    // In development without the Tauri shell this can fail; the HTTP check below still gives the user-facing result.
+    console.info("PaperRadar local service command did not complete", error);
+  }
+}
 function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-export async function waitForLocalService(options: { attempts?: number; intervalMs?: number } = {}) {
-  const attempts = options.attempts ?? 30;
+export async function waitForLocalService(options: { attempts?: number; intervalMs?: number; restart?: boolean } = {}) {
+  const attempts = options.attempts ?? 36;
   const intervalMs = options.intervalMs ?? 500;
   let lastError: unknown = null;
 
   if (RUNTIME_MODE === "mock") return true;
+
+  await invokeDesktopCommand(options.restart ? "restart_local_service" : "ensure_local_service");
 
   for (let index = 0; index < attempts; index += 1) {
     try {
@@ -100,6 +112,9 @@ export async function waitForLocalService(options: { attempts?: number; interval
       lastError = error;
       if (error instanceof PaperRadarApiError && error.kind !== "local_service_unavailable") {
         throw error;
+      }
+      if (index === 6 && !options.restart) {
+        await invokeDesktopCommand("restart_local_service");
       }
       if (index < attempts - 1) await sleep(intervalMs);
     }

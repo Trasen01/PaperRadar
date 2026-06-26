@@ -13,7 +13,7 @@ import { SourceStatusBar } from "../components/status/SourceStatusBar";
 import { PaperTable } from "../components/papers/PaperTable";
 import { PaperDetailSheet } from "../components/papers/PaperDetailSheet";
 import { Toast } from "../components/ui/toast";
-import { PaperRadarApiError, getRuntimeMode, getStatus, startHistoryResearch, userFacingError } from "../services/api";
+import { PaperRadarApiError, getRuntimeMode, startHistoryResearch, waitForLocalService, userFacingError } from "../services/api";
 import { openPaperLink } from "../services/papers";
 
 type RunState = "idle" | "researching" | "success" | "empty" | "partial_success" | "service_unavailable" | "request_failed" | "internal_error" | "cancelled";
@@ -98,7 +98,7 @@ export function HistoryResearch() {
   const checkService = async () => {
     if (mockMode) return true;
     try {
-      await getStatus();
+      await waitForLocalService();
       if (state === "service_unavailable") setState("idle");
       setLastErrorDetail(null);
       setToast({ title: "文献检索服务已就绪", description: "现在可以开始历史调研。", type: "success" });

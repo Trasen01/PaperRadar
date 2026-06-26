@@ -81,6 +81,38 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   }
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+export async function waitForLocalService(options: { attempts?: number; intervalMs?: number } = {}) {
+  const attempts = options.attempts ?? 30;
+  const intervalMs = options.intervalMs ?? 500;
+  let lastError: unknown = null;
+
+  if (RUNTIME_MODE === "mock") return true;
+
+  for (let index = 0; index < attempts; index += 1) {
+    try {
+      await getStatus();
+      return true;
+    } catch (error) {
+      lastError = error;
+      if (error instanceof PaperRadarApiError && error.kind !== "local_service_unavailable") {
+        throw error;
+      }
+      if (index < attempts - 1) await sleep(intervalMs);
+    }
+  }
+
+  if (lastError instanceof PaperRadarApiError) throw lastError;
+  throw new PaperRadarApiError(
+    "local_service_unavailable",
+    "文献检索服务暂不可用",
+    "PaperRadar 无法启动本地检索服务。请点击重试，或查看日志。",
+    { detail: lastError instanceof Error ? lastError.message : String(lastError) }
+  );
+}
 function mockPayload(): { papers: Paper[]; summary: PaperSummary } {
   return { papers: mockPapers, summary: mockSummary };
 }

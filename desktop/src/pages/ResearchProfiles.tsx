@@ -10,7 +10,7 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { EmptyState } from "../components/ui/empty-state";
 import { Toast } from "../components/ui/toast";
-import { PaperRadarApiError, getProfiles, getRuntimeMode, userFacingError } from "../services/api";
+import { PaperRadarApiError, getProfiles, getRuntimeMode, waitForLocalService, userFacingError } from "../services/api";
 
 type LoadState = "loading" | "ready" | "empty" | "service_unavailable" | "error";
 type ToastState = { title?: string; description?: string; message?: string; type: "success" | "error" | "warning" | "info" } | null;
@@ -35,6 +35,7 @@ export function ResearchProfiles() {
     setState("loading");
     setLastErrorDetail(null);
     try {
+      await waitForLocalService();
       const result = await getProfiles();
       setProfiles(result);
       setState(result.length ? "ready" : "empty");

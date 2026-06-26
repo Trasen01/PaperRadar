@@ -17,6 +17,7 @@ dist/
 *.spec
 !PaperRadar.release.spec
 !PaperRadar.debug.spec
+!PaperRadar.qt.spec
 
 # Runtime user data
 config/

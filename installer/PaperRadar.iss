@@ -1,5 +1,5 @@
 ﻿#define MyAppName "PaperRadar"
-#define MyAppVersion "0.2.4"
+#define MyAppVersion "0.3.0"
 #define MyAppPublisher "PaperRadar 项目"
 #define MyAppExeName "PaperRadar.exe"
 #define MyAppId "{{1F0CB35D-5B7B-45D1-9B31-202602000001}}"

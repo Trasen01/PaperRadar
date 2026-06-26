@@ -34,7 +34,7 @@ docs/images/
 Download and run the Windows installer:
 
 ```text
-PaperRadar_Setup_v0.2.4.exe
+PaperRadar_Setup_v0.3.0.exe
 ```
 
 The installer supports:
@@ -175,7 +175,7 @@ Install Inno Setup 6, then run:
 Output:
 
 ```text
-dist\installer\PaperRadar_Setup_v0.2.4.exe
+dist\installer\PaperRadar_Setup_v0.3.0.exe
 ```
 
 The installer is generated from:

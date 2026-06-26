@@ -18,6 +18,7 @@ def retry_call(
     timeout: int | float,
     max_retries: int = 3,
     retry_delay_seconds: int | float = 3,
+    on_retry: Callable[[Exception, int, int], None] | None = None,
 ) -> T:
     last_exc: Exception | None = None
     attempts = max(1, int(max_retries))
@@ -35,6 +36,8 @@ def retry_call(
                 timeout,
                 exc,
             )
+            if on_retry:
+                on_retry(exc, attempt, attempts)
             if attempt < attempts:
                 time.sleep(float(retry_delay_seconds))
     assert last_exc is not None

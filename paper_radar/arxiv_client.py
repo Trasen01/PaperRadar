@@ -32,6 +32,8 @@ class ArxivClient:
         self.timeout = timeout
         self.max_retries = max_retries
         self.retry_delay_seconds = retry_delay_seconds
+        self.retry_failures = 0
+        self.last_retry_error = ""
 
     def fetch_recent(self, days_back: int = 7, max_results: int = 100) -> list[Paper]:
         category_query = " OR ".join(f"cat:{cat}" for cat in DEFAULT_CATEGORIES)
@@ -50,6 +52,13 @@ class ArxivClient:
         }
         url = f"{ARXIV_API_URL}?{urlencode(params)}"
         logger.info("Fetching arXiv: %s", url)
+        self.retry_failures = 0
+        self.last_retry_error = ""
+
+        def remember_retry(exc: Exception, _attempt: int, _attempts: int) -> None:
+            self.retry_failures += 1
+            self.last_retry_error = str(exc) or exc.__class__.__name__
+
         response = retry_call(
             lambda: requests.get(url, timeout=self.timeout),
             source_type="arxiv",
@@ -57,6 +66,7 @@ class ArxivClient:
             timeout=self.timeout,
             max_retries=self.max_retries,
             retry_delay_seconds=self.retry_delay_seconds,
+            on_retry=remember_retry,
         )
         response.raise_for_status()
 

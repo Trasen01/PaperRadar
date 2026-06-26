@@ -8,7 +8,7 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
 
 if (-not (Test-Path "dist\PaperRadar\PaperRadar.exe")) {
-    & "$PSScriptRoot\build_exe.ps1" -Python $Python
+    & "$PSScriptRoot\build_qt_exe.ps1" -Python $Python
 }
 
 if (-not (Test-Path $InnoSetupCompiler)) {

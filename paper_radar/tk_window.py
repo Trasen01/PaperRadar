@@ -43,7 +43,7 @@ from .settings import load_keywords, load_settings, load_sources
 from .utils import REPORTS_DIR, format_date_only, open_folder, open_url, title_hash
 
 logger = logging.getLogger(__name__)
-RESULT_COLUMNS = ("score", "source", "type", "title", "authors", "date", "keywords", "link")
+RESULT_COLUMNS = ("score", "source", "type", "title", "authors", "date", "keywords", "action")
 
 
 def enable_windows_high_dpi() -> None:
@@ -255,7 +255,6 @@ class HistoricalSurveyRunner:
         from_date: date,
         until_date: date,
         sources: dict[str, bool],
-        ignore_cache: bool,
         settings: dict[str, Any],
         emit,
         should_stop,
@@ -264,7 +263,6 @@ class HistoricalSurveyRunner:
         self.from_date = from_date
         self.until_date = until_date
         self.sources = sources
-        self.ignore_cache = ignore_cache
         self.settings = settings
         self.emit = emit
         self.should_stop = should_stop
@@ -278,7 +276,6 @@ class HistoricalSurveyRunner:
             rows_per_query = int(self.settings.get("crossref", {}).get("rows_per_query", 20))
             max_queries = int(self.settings.get("crossref", {}).get("max_queries_per_run", 200))
             delay = float(self.settings.get("crossref", {}).get("request_delay_seconds", 0.5))
-            cache_hours = int(self.settings.get("crossref", {}).get("cache_hours", 24))
             network = self.settings.get("network", {})
             timeout = int(network.get("historical_timeout_seconds", 60))
             max_retries = int(network.get("max_retries", 3))
@@ -356,7 +353,7 @@ class HistoricalSurveyRunner:
                     journal, query, issns = tasks[task_index]
                     task_index += 1
                     cache_key = ("crossref", str(journal.get("name")), query, self.from_date.isoformat(), self.until_date.isoformat())
-                    if not self.ignore_cache and cache_enabled and self.db.is_query_cached(*cache_key, cache_hours=cache_hours):
+                    if cache_enabled and self.db.is_query_cached_today(*cache_key):
                         completed += 1
                         stats["cached"] += 1
                         stats["cache_hit"] += 1
@@ -408,6 +405,15 @@ class HistoricalSurveyRunner:
                             submit_next(executor)
                 if batch_papers:
                     self._handle_batch(batch_papers, all_seen, stats, completed, total_steps, "顶级期刊", "批量结果")
+
+                if stats.get("cache_hit"):
+                    cached = self.db.load_papers_for_period(
+                        self.from_date.isoformat(),
+                        self.until_date.isoformat(),
+                        ("crossref", "journal_rss", "arxiv"),
+                    )
+                    if cached:
+                        self._handle_batch(cached, all_seen, stats, completed, total_steps, "\u672c\u5730\u7f13\u5b58", "\u4eca\u65e5\u5df2\u7f13\u5b58\u7ed3\u679c")
 
             scored = score_and_tag(dedupe_papers(all_seen), self.keyword_filter, keep_unmatched=False)
             storage = self.db.upsert_papers_with_stats(scored)
@@ -506,10 +512,10 @@ class MainWindow(tk.Tk):
     def _apply_responsive_window_size(self) -> None:
         screen_w = max(self.winfo_screenwidth(), 1024)
         screen_h = max(self.winfo_screenheight(), 720)
-        width = min(1640, max(1080, screen_w - 80))
-        height = min(980, max(680, screen_h - 90))
-        min_w = min(1180, max(980, screen_w - 160))
-        min_h = min(760, max(620, screen_h - 160))
+        width = min(1560, max(1000, screen_w - 120))
+        height = min(900, max(640, screen_h - 140))
+        min_w = min(980, max(860, screen_w - 260))
+        min_h = min(640, max(560, screen_h - 260))
         x = max(0, (screen_w - width) // 2)
         y = max(0, (screen_h - height) // 2)
         self.geometry(f"{width}x{height}+{x}+{y}")
@@ -517,48 +523,73 @@ class MainWindow(tk.Tk):
 
     def _palette(self, mode: str = "dark") -> dict[str, str]:
         return {
-            "bg": "#172338",
-            "surface": "#1d2c45",
-            "surface2": "#263956",
-            "text": "#f4f7fb",
-            "muted": "#bdcbe0",
-            "border": "#4a6384",
-            "primary": "#5a9cff",
-            "primary_hover": "#4388ef",
-            "accent": "#3dd6c6",
-            "danger": "#ff6b7a",
-            "success": "#4ade80",
-            "table_alt": "#22324d",
+            "bg": "#f6f8fb",
+            "workspace": "#f8fafc",
+            "sidebar": "#eef4fb",
+            "sidebar2": "#ffffff",
+            "surface": "#ffffff",
+            "surface2": "#f5f8fc",
+            "surface3": "#e8f1ff",
+            "text": "#172033",
+            "muted": "#66758f",
+            "inverse": "#172033",
+            "inverse_muted": "#667085",
+            "border": "#e3eaf3",
+            "primary": "#2563eb",
+            "primary_hover": "#1d4ed8",
+            "accent": "#0f766e",
+            "accent_soft": "#e6f7f4",
+            "danger": "#b42318",
+            "danger_soft": "#fff1f0",
+            "success": "#15803d",
+            "success_soft": "#eaf7ef",
+            "warning": "#b45309",
+            "warning_soft": "#fff7e6",
+            "table_alt": "#fbfdff",
         }
 
     def _build_ui(self) -> None:
         self._configure_styles()
         self.configure(bg=self.colors["bg"])
-        self.appbar = ttk.Frame(self, style="AppBar.TFrame")
-        self.appbar.pack(fill="x")
-        brand_cluster = ttk.Frame(self.appbar, style="AppBar.TFrame")
-        brand_cluster.pack(side="left", padx=(30, 24), pady=16)
-        self.logo_canvas = tk.Canvas(brand_cluster, width=30, height=30, bd=0, highlightthickness=0, bg=self.colors["surface"])
-        self.logo_canvas.pack(side="left", padx=(0, 10))
+        self.shell = ttk.Frame(self, style="Page.TFrame")
+        self.shell.pack(fill="both", expand=True)
+        self.shell.columnconfigure(0, minsize=252, weight=0)
+        self.shell.columnconfigure(1, weight=1)
+        self.shell.rowconfigure(0, weight=1)
+
+        self.sidebar = ttk.Frame(self.shell, style="Sidebar.TFrame", padding=(12, 12))
+        self.sidebar.grid(row=0, column=0, sticky="nsew")
+        self.sidebar.grid_propagate(False)
+
+        brand = ttk.Frame(self.sidebar, style="Sidebar.TFrame")
+        brand.pack(fill="x")
+        self.logo_canvas = tk.Canvas(brand, width=30, height=30, bd=0, highlightthickness=0, bg=self.colors["sidebar"])
+        self.logo_canvas.pack(side="left", padx=(0, 8))
         self._draw_logo(self.logo_canvas)
-        brand_text = ttk.Frame(brand_cluster, style="AppBar.TFrame")
-        brand_text.pack(side="left")
-        ttk.Label(brand_text, text="PaperRadar", style="Brand.TLabel").pack(anchor="w")
-        ttk.Label(brand_text, text="科研文献监控 · 论文发现 · 趋势分析", style="Muted.TLabel").pack(anchor="w")
+        brand_text = ttk.Frame(brand, style="Sidebar.TFrame")
+        brand_text.pack(side="left", fill="x", expand=True)
+        ttk.Label(brand_text, text="PaperRadar", style="SidebarBrand.TLabel").pack(anchor="w")
+        ttk.Label(brand_text, text="\u6587\u732e\u96f7\u8fbe", style="SidebarMuted.TLabel").pack(anchor="w", pady=(1, 0))
 
-        self.nav_frame = ttk.Frame(self.appbar, style="AppBar.TFrame")
-        self.nav_frame.pack(side="left", pady=16)
+        ttk.Frame(self.sidebar, style="SidebarRule.TFrame", height=1).pack(fill="x", pady=(14, 10))
+        ttk.Label(self.sidebar, text="\u5de5\u4f5c\u53f0", style="SidebarSection.TLabel").pack(anchor="w", pady=(0, 6))
         self.nav_buttons: dict[str, tk.Button] = {}
-        for key, label in [("daily", "每日雷达"), ("survey", "历史调研"), ("profile", "研究方向")]:
-            self.nav_buttons[key] = self._nav_button(self.nav_frame, key, label)
+        for key, label in [("daily", "\u4eca\u65e5\u53d1\u73b0"), ("survey", "\u5386\u53f2\u8c03\u7814"), ("profile", "\u7814\u7a76\u65b9\u5411")]:
+            self.nav_buttons[key] = self._nav_button(self.sidebar, key, label)
 
-        self.content = ttk.Frame(self, style="Page.TFrame")
-        self.content.pack(fill="both", expand=True)
+        ttk.Frame(self.sidebar, style="Sidebar.TFrame").pack(fill="both", expand=True)
+        local = ttk.Frame(self.sidebar, style="SidebarCard.TFrame", padding=(12, 10))
+        local.pack(fill="x", pady=(12, 0))
+        ttk.Label(local, text="\u672c\u5730\u6a21\u5f0f", style="SidebarCardTitle.TLabel").pack(anchor="w")
+        ttk.Label(local, text="\u6570\u636e\u3001Profile \u548c\u62a5\u544a\u5747\u4fdd\u5b58\u5728\u672c\u673a", style="SidebarCardMuted.TLabel", wraplength=190).pack(anchor="w", pady=(4, 0))
+
+        self.content = ttk.Frame(self.shell, style="Workspace.TFrame")
+        self.content.grid(row=0, column=1, sticky="nsew")
         self.content.rowconfigure(0, weight=1)
         self.content.columnconfigure(0, weight=1)
-        self.daily_tab = ttk.Frame(self.content, style="Page.TFrame")
-        self.survey_tab = ttk.Frame(self.content, style="Page.TFrame")
-        self.profile_tab = ttk.Frame(self.content, style="Page.TFrame")
+        self.daily_tab = ttk.Frame(self.content, style="Workspace.TFrame")
+        self.survey_tab = ttk.Frame(self.content, style="Workspace.TFrame")
+        self.profile_tab = ttk.Frame(self.content, style="Workspace.TFrame")
         self.choice_buttons: list[tk.Button] = []
         self.check_buttons: list[tuple[tk.Button, tk.BooleanVar, str]] = []
         self.scroll_canvases: list[tk.Canvas] = []
@@ -571,33 +602,34 @@ class MainWindow(tk.Tk):
 
     def _draw_logo(self, canvas: tk.Canvas) -> None:
         canvas.delete("all")
-        canvas.create_oval(2, 2, 28, 28, fill=self.colors["primary"], outline="")
-        canvas.create_oval(8, 7, 22, 21, outline="#ffffff", width=2)
-        canvas.create_line(20, 19, 25, 24, fill="#ffffff", width=2, capstyle="round")
+        canvas.create_rectangle(1, 1, 33, 33, fill=self.colors["primary"], outline="", width=0)
+        canvas.create_oval(9, 8, 23, 22, outline="#ffffff", width=2)
+        canvas.create_line(21, 21, 28, 28, fill="#ffffff", width=2, capstyle="round")
+        canvas.create_line(8, 27, 14, 27, fill=self.colors["accent_soft"], width=2, capstyle="round")
 
     def _nav_button(self, parent: ttk.Frame, key: str, text: str) -> tk.Button:
         button = tk.Button(
             parent,
             text=text,
             bd=0,
-            padx=14,
-            pady=8,
+            padx=16,
+            pady=13,
             cursor="hand2",
-            font=("Microsoft YaHei UI", 10, "bold"),
+            anchor="w",
+            font=("Microsoft YaHei UI", 11, "bold"),
             command=lambda: self._select_tab(key),
         )
-        button.pack(side="left", padx=(0, 6))
+        button.pack(fill="x", pady=(0, 8))
         return button
 
     def _style_plain_button(self, button: tk.Button, selected: bool = False) -> None:
-        hover_bg = "#2a3d5e"
         button.configure(
-            bg=self.colors["primary"] if selected else self.colors["surface"],
-            fg="#ffffff" if selected else self.colors["text"],
-            activebackground=self.colors["primary_hover"] if selected else hover_bg,
-            activeforeground="#ffffff" if selected else self.colors["primary"],
-            highlightthickness=1,
-            highlightbackground=self.colors["primary"] if selected else self.colors["border"],
+            bg=self.colors["surface3"] if selected else self.colors["sidebar"],
+            fg=self.colors["primary"] if selected else self.colors["text"],
+            activebackground=self.colors["surface3"],
+            activeforeground=self.colors["primary"],
+            highlightthickness=2 if selected else 0,
+            highlightbackground=self.colors["primary"],
             highlightcolor=self.colors["primary"],
             relief="flat",
         )
@@ -622,42 +654,48 @@ class MainWindow(tk.Tk):
         colors = self.colors
         self.style = ttk.Style(self)
         self.style.theme_use("clam")
-        self.style.configure(".", font=("Microsoft YaHei UI", 10), background=colors["bg"], foreground=colors["text"])
+        self.style.configure(".", font=("Microsoft YaHei UI", 10), background=colors["workspace"], foreground=colors["text"])
         self.style.configure("Page.TFrame", background=colors["bg"])
-        self.style.configure("AppBar.TFrame", background=colors["surface"], bordercolor=colors["border"])
-        self.style.configure("Card.TFrame", background=colors["surface"], relief="solid", borderwidth=1, bordercolor=colors["border"], lightcolor=colors["border"], darkcolor=colors["border"])
-        self.style.configure("Header.TFrame", background=colors["surface"], relief="flat", borderwidth=0)
-        self.style.configure("Table.TFrame", background=colors["surface"], relief="solid", borderwidth=1, bordercolor=colors["border"], lightcolor=colors["border"], darkcolor=colors["border"])
-        self.style.configure("Brand.TLabel", background=colors["surface"], foreground=colors["text"], font=("Microsoft YaHei UI", 18, "bold"))
-        self.style.configure("Title.TLabel", background=colors["surface"], foreground=colors["text"], font=("Microsoft YaHei UI", 16, "bold"))
+        self.style.configure("Workspace.TFrame", background=colors["workspace"])
+        self.style.configure("Sidebar.TFrame", background=colors["sidebar"])
+        self.style.configure("SidebarRule.TFrame", background=colors["border"])
+        self.style.configure("SidebarCard.TFrame", background=colors["sidebar2"], relief="solid", borderwidth=1, bordercolor=colors["border"])
+        self.style.configure("Card.TFrame", background=colors["surface"], relief="solid", borderwidth=1, bordercolor=colors["border"])
+        self.style.configure("Header.TFrame", background=colors["surface"], relief="solid", borderwidth=1, bordercolor=colors["border"])
+        self.style.configure("Table.TFrame", background=colors["surface"], relief="solid", borderwidth=1, bordercolor=colors["border"])
+        self.style.configure("Brand.TLabel", background=colors["surface"], foreground=colors["text"], font=("Microsoft YaHei UI", 16, "bold"))
+        self.style.configure("SidebarBrand.TLabel", background=colors["sidebar"], foreground=colors["text"], font=("Microsoft YaHei UI", 14, "bold"))
+        self.style.configure("SidebarMuted.TLabel", background=colors["sidebar"], foreground=colors["muted"], font=("Microsoft YaHei UI", 9))
+        self.style.configure("SidebarSection.TLabel", background=colors["sidebar"], foreground=colors["muted"], font=("Microsoft YaHei UI", 9, "bold"))
+        self.style.configure("SidebarCardTitle.TLabel", background=colors["sidebar2"], foreground=colors["text"], font=("Microsoft YaHei UI", 10, "bold"))
+        self.style.configure("SidebarCardMuted.TLabel", background=colors["sidebar2"], foreground=colors["muted"], font=("Microsoft YaHei UI", 9))
+        self.style.configure("Title.TLabel", background=colors["surface"], foreground=colors["text"], font=("Microsoft YaHei UI", 14, "bold"))
+        self.style.configure("DetailTitle.TLabel", background=colors["surface"], foreground=colors["text"], font=("Microsoft YaHei UI", 13, "bold"))
+        self.style.configure("HeroTitle.TLabel", background=colors["surface"], foreground=colors["text"], font=("Microsoft YaHei UI", 16, "bold"))
         self.style.configure("Muted.TLabel", background=colors["surface"], foreground=colors["muted"])
+        self.style.configure("TopMuted.TLabel", background=colors["surface"], foreground=colors["muted"], font=("Microsoft YaHei UI", 9))
         self.style.configure("Body.TLabel", background=colors["surface"], foreground=colors["text"])
-        self.style.configure("Metric.TLabel", background=colors["surface2"], foreground=colors["text"], padding=(12, 9), font=("Microsoft YaHei UI", 10, "bold"))
-        self.style.configure("Primary.TButton", background=colors["primary"], foreground="#ffffff", padding=(16, 10), font=("Microsoft YaHei UI", 10, "bold"), relief="flat", borderwidth=0)
-        self.style.map("Primary.TButton", background=[("active", colors["primary_hover"]), ("disabled", "#30435f")], foreground=[("disabled", "#9aabc1")])
-        self.style.configure("Danger.TButton", background=colors["surface2"], foreground=colors["danger"], padding=(16, 10), font=("Microsoft YaHei UI", 10, "bold"), relief="flat", borderwidth=0)
-        self.style.map("Danger.TButton", background=[("active", "#4a2230"), ("disabled", "#22324d")], foreground=[("disabled", "#9aa8bb")])
-        self.style.configure("Secondary.TButton", background=colors["surface2"], foreground=colors["primary"], padding=(16, 10), font=("Microsoft YaHei UI", 10, "bold"), relief="flat", borderwidth=0)
-        self.style.map("Secondary.TButton", background=[("active", "#2a3d5e")])
+        self.style.configure("Metric.TLabel", background=colors["surface2"], foreground=colors["text"], padding=(10, 7), font=("Microsoft YaHei UI", 10))
+        self.style.configure("Primary.TButton", background=colors["primary"], foreground="#ffffff", padding=(14, 8), font=("Microsoft YaHei UI", 10), relief="flat", borderwidth=0)
+        self.style.map("Primary.TButton", background=[("active", colors["primary_hover"]), ("disabled", "#d0d7de")], foreground=[("disabled", "#667085")])
+        self.style.configure("Danger.TButton", background=colors["danger_soft"], foreground=colors["danger"], padding=(14, 8), font=("Microsoft YaHei UI", 10), relief="flat", borderwidth=0)
+        self.style.map("Danger.TButton", background=[("active", "#f3c7c2"), ("disabled", colors["surface3"])], foreground=[("disabled", "#98a2b3")])
+        self.style.configure("Secondary.TButton", background=colors["surface3"], foreground=colors["text"], padding=(14, 8), font=("Microsoft YaHei UI", 10), relief="flat", borderwidth=0)
+        self.style.map("Secondary.TButton", background=[("active", "#dcecff")], foreground=[("active", colors["primary"])])
         self.style.configure("TCheckbutton", background=colors["surface"], foreground=colors["text"], indicatorcolor=colors["surface"], indicatordiameter=14, padding=(8, 5))
-        self.style.map(
-            "TCheckbutton",
-            background=[("active", colors["surface2"])],
-            foreground=[("active", colors["text"])],
-            indicatorcolor=[("selected", colors["primary"]), ("!selected", colors["surface"])],
-        )
-        self.style.configure("TEntry", fieldbackground=colors["surface"], foreground=colors["text"], bordercolor=colors["border"], lightcolor=colors["border"], darkcolor=colors["border"], padding=(12, 9), insertcolor=colors["text"])
-        self.style.configure("TSpinbox", fieldbackground=colors["surface"], foreground=colors["text"], bordercolor=colors["border"], lightcolor=colors["border"], darkcolor=colors["border"], arrowsize=0, padding=(10, 7))
-        self.style.configure("Treeview", background=colors["surface"], fieldbackground=colors["surface"], foreground=colors["text"], rowheight=38, borderwidth=0, relief="flat", bordercolor=colors["surface"], lightcolor=colors["surface"], darkcolor=colors["surface"], font=("Microsoft YaHei UI", 10))
-        self.style.map("Treeview", background=[("selected", "#2f6fd6")], foreground=[("selected", "#ffffff")])
-        self.style.configure("Treeview.Heading", background=colors["surface2"], foreground=colors["muted"], padding=(12, 10), font=("Microsoft YaHei UI", 10, "bold"), relief="flat", borderwidth=0, bordercolor=colors["surface"], lightcolor=colors["surface"], darkcolor=colors["surface"])
+        self.style.map("TCheckbutton", background=[("active", colors["surface2"])], foreground=[("active", colors["text"])], indicatorcolor=[("selected", colors["primary"]), ("!selected", colors["surface"])])
+        self.style.configure("TEntry", fieldbackground=colors["surface"], foreground=colors["text"], bordercolor=colors["border"], lightcolor=colors["border"], darkcolor=colors["border"], padding=(9, 7), insertcolor=colors["text"])
+        self.style.configure("TSpinbox", fieldbackground=colors["surface"], foreground=colors["text"], bordercolor=colors["border"], lightcolor=colors["border"], darkcolor=colors["border"], arrowsize=0, padding=(8, 6))
+        self.style.configure("Treeview", background=colors["surface"], fieldbackground=colors["surface"], foreground=colors["text"], rowheight=36, borderwidth=0, relief="flat", bordercolor=colors["surface"], lightcolor=colors["surface"], darkcolor=colors["surface"], font=("Microsoft YaHei UI", 10))
+        self.style.map("Treeview", background=[("selected", "#dbeafe")], foreground=[("selected", colors["text"])])
+        self.style.configure("Treeview.Heading", background=colors["surface2"], foreground=colors["muted"], padding=(10, 8), font=("Microsoft YaHei UI", 10, "bold"), relief="flat", borderwidth=0, bordercolor=colors["surface"], lightcolor=colors["surface"], darkcolor=colors["surface"])
         self.style.layout("Vertical.TScrollbar", [("Vertical.Scrollbar.trough", {"sticky": "ns", "children": [("Vertical.Scrollbar.thumb", {"expand": "1", "sticky": "nswe"})]})])
         self.style.layout("Horizontal.TScrollbar", [("Horizontal.Scrollbar.trough", {"sticky": "ew", "children": [("Horizontal.Scrollbar.thumb", {"expand": "1", "sticky": "nswe"})]})])
-        self.style.configure("Vertical.TScrollbar", background="#6b86ad", troughcolor=colors["surface"], bordercolor=colors["surface"], arrowcolor=colors["surface"], relief="flat", width=13, arrowsize=1, gripcount=0)
-        self.style.configure("Horizontal.TScrollbar", background="#6b86ad", troughcolor=colors["surface"], bordercolor=colors["surface"], arrowcolor=colors["surface"], relief="flat", width=13, arrowsize=1, gripcount=0)
-        self.style.map("Vertical.TScrollbar", background=[("active", colors["primary"])])
-        self.style.map("Horizontal.TScrollbar", background=[("active", colors["primary"])])
-        self.style.configure("Horizontal.TProgressbar", background=colors["primary"], troughcolor=colors["surface2"], bordercolor=colors["surface2"], lightcolor=colors["primary"], darkcolor=colors["primary"])
+        self.style.configure("Vertical.TScrollbar", background="#c9d7eb", troughcolor="#edf3fa", bordercolor="#f7fbff", arrowcolor="#f7fbff", relief="flat", width=14, arrowsize=1, gripcount=0)
+        self.style.configure("Horizontal.TScrollbar", background="#c9d7eb", troughcolor="#edf3fa", bordercolor="#f7fbff", arrowcolor="#f7fbff", relief="flat", width=14, arrowsize=1, gripcount=0)
+        self.style.map("Vertical.TScrollbar", background=[("active", colors["primary_hover"])])
+        self.style.map("Horizontal.TScrollbar", background=[("active", colors["primary_hover"])])
+        self.style.configure("Horizontal.TProgressbar", background=colors["primary"], troughcolor="#f7fbff", bordercolor="#f7fbff", lightcolor=colors["primary"], darkcolor=colors["primary"])
 
     def _style_text_widget(self, widget: tk.Text | scrolledtext.ScrolledText | None) -> None:
         if widget is None:
@@ -666,8 +704,8 @@ class MainWindow(tk.Tk):
             bg=self.colors["surface"],
             fg=self.colors["text"],
             insertbackground=self.colors["text"],
-            selectbackground="#2f6fd6",
-            selectforeground="#ffffff",
+            selectbackground="#dbeafe",
+            selectforeground=self.colors["text"],
             relief="flat",
             bd=0,
             padx=12,
@@ -676,26 +714,31 @@ class MainWindow(tk.Tk):
         )
 
     def _page_header(self, parent: ttk.Frame, title: str, subtitle: str) -> None:
-        header = ttk.Frame(parent, style="Header.TFrame", padding=(16, 10))
-        header.pack(fill="x", padx=18, pady=(12, 8))
+        header = ttk.Frame(parent, style="Header.TFrame", padding=(18, 16))
+        header.pack(fill="x", padx=18, pady=(14, 8))
         ttk.Label(header, text=title, style="Title.TLabel").pack(anchor="w")
-        ttk.Label(header, text=subtitle, style="Muted.TLabel", wraplength=420, justify="left").pack(anchor="w", fill="x", pady=(4, 0))
+        ttk.Label(header, text=subtitle, style="Muted.TLabel", wraplength=440, justify="left").pack(anchor="w", fill="x", pady=(6, 0))
 
     def _card(self, parent: ttk.Frame, title: str | None = None) -> ttk.Frame:
-        outer = ttk.Frame(parent, style="Card.TFrame", padding=(12, 8))
+        outer = ttk.Frame(parent, style="Card.TFrame", padding=(16, 12))
         if title:
-            ttk.Label(outer, text=title, style="Body.TLabel", font=("Microsoft YaHei UI", 10, "bold")).pack(anchor="w", pady=(0, 8))
+            ttk.Label(outer, text=title, style="Body.TLabel", font=("Microsoft YaHei UI", 10, "bold")).pack(anchor="w", pady=(0, 10))
         return outer
 
     def _scrollable_panel(self, parent: ttk.Frame) -> tuple[ttk.Frame, ttk.Frame]:
-        outer = ttk.Frame(parent, style="Page.TFrame")
-        canvas = tk.Canvas(outer, bd=0, highlightthickness=0, bg=self.colors["bg"], yscrollincrement=24)
-        scroll = ttk.Scrollbar(outer, orient="vertical", style="Vertical.TScrollbar", command=canvas.yview)
-        inner = ttk.Frame(canvas, style="Page.TFrame")
+        return self._scrollable_workspace(parent, min_width=320)
+
+    def _scrollable_workspace(self, parent: ttk.Frame, min_width: int = 1080) -> tuple[ttk.Frame, ttk.Frame]:
+        outer = ttk.Frame(parent, style="Workspace.TFrame")
+        canvas = tk.Canvas(outer, bd=0, highlightthickness=0, bg=self.colors["workspace"], yscrollincrement=24, xscrollincrement=24)
+        vscroll = ttk.Scrollbar(outer, orient="vertical", style="Vertical.TScrollbar", command=canvas.yview)
+        hscroll = ttk.Scrollbar(outer, orient="horizontal", style="Horizontal.TScrollbar", command=canvas.xview)
+        inner = ttk.Frame(canvas, style="Workspace.TFrame")
         window_id = canvas.create_window((0, 0), window=inner, anchor="nw")
-        canvas.configure(yscrollcommand=scroll.set)
+        canvas.configure(yscrollcommand=vscroll.set, xscrollcommand=hscroll.set)
         canvas.grid(row=0, column=0, sticky="nsew")
-        scroll.grid(row=0, column=1, sticky="ns", padx=(6, 0))
+        vscroll.grid(row=0, column=1, sticky="ns")
+        hscroll.grid(row=1, column=0, sticky="ew")
         outer.rowconfigure(0, weight=1)
         outer.columnconfigure(0, weight=1)
 
@@ -703,18 +746,57 @@ class MainWindow(tk.Tk):
             canvas.configure(scrollregion=canvas.bbox("all"))
 
         def sync_inner_width(event: tk.Event) -> None:
-            canvas.itemconfigure(window_id, width=event.width)
+            canvas.itemconfigure(window_id, width=max(event.width, min_width))
 
-        def wheel(event: tk.Event) -> str | None:
-            if canvas.bbox("all") and canvas.winfo_height() < (canvas.bbox("all")[3] - canvas.bbox("all")[1]):
-                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-                return "break"
-            return None
+        def wheel(event: tk.Event) -> str:
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            return "break"
+
+        def shift_wheel(event: tk.Event) -> str:
+            canvas.xview_scroll(int(-1 * (event.delta / 120)), "units")
+            return "break"
 
         inner.bind("<Configure>", sync_scroll_region)
         canvas.bind("<Configure>", sync_inner_width)
-        canvas.bind("<MouseWheel>", wheel)
-        inner.bind("<MouseWheel>", wheel)
+        for widget in (canvas, inner):
+            widget.bind("<MouseWheel>", wheel)
+            widget.bind("<Shift-MouseWheel>", shift_wheel)
+        self.scroll_canvases.append(canvas)
+        return outer, inner
+
+    def _scrollable_workspace(self, parent: ttk.Frame, min_width: int = 1180) -> tuple[ttk.Frame, ttk.Frame]:
+        outer = ttk.Frame(parent, style="Workspace.TFrame")
+        canvas = tk.Canvas(outer, bd=0, highlightthickness=0, bg=self.colors["workspace"], yscrollincrement=28, xscrollincrement=28)
+        vscroll = ttk.Scrollbar(outer, orient="vertical", style="Vertical.TScrollbar", command=canvas.yview)
+        hscroll = ttk.Scrollbar(outer, orient="horizontal", style="Horizontal.TScrollbar", command=canvas.xview)
+        inner = ttk.Frame(canvas, style="Workspace.TFrame")
+        window_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=vscroll.set, xscrollcommand=hscroll.set)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        vscroll.grid(row=0, column=1, sticky="ns")
+        hscroll.grid(row=1, column=0, sticky="ew")
+        outer.rowconfigure(0, weight=1)
+        outer.columnconfigure(0, weight=1)
+
+        def sync_scroll_region(_event: tk.Event | None = None) -> None:
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def sync_inner_width(event: tk.Event) -> None:
+            canvas.itemconfigure(window_id, width=max(event.width, min_width))
+
+        def wheel(event: tk.Event) -> str:
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            return "break"
+
+        def shift_wheel(event: tk.Event) -> str:
+            canvas.xview_scroll(int(-1 * (event.delta / 120)), "units")
+            return "break"
+
+        inner.bind("<Configure>", sync_scroll_region)
+        canvas.bind("<Configure>", sync_inner_width)
+        for widget in (canvas, inner):
+            widget.bind("<MouseWheel>", wheel)
+            widget.bind("<Shift-MouseWheel>", shift_wheel)
         self.scroll_canvases.append(canvas)
         return outer, inner
 
@@ -739,167 +821,161 @@ class MainWindow(tk.Tk):
 
     def _style_check_pill(self, button: tk.Button, var: tk.BooleanVar, text: str) -> None:
         selected = bool(var.get())
-        icon = "✓" if selected else "+"
         button.configure(
-            text=f"{icon}  {text}",
-            bg=self.colors["primary"] if selected else self.colors["surface"],
-            fg="#ffffff" if selected else self.colors["text"],
-            activebackground=self.colors["primary_hover"] if selected else self.colors["surface2"],
-            activeforeground="#ffffff" if selected else self.colors["primary"],
-            highlightthickness=1,
-            highlightbackground=self.colors["primary"] if selected else self.colors["border"],
-            highlightcolor=self.colors["primary"],
+            text=f"{text}\uff1a{'\u5df2\u542f\u7528' if selected else '\u672a\u542f\u7528'}",
+            bg=self.colors["success_soft"] if selected else self.colors["surface2"],
+            fg=self.colors["success"] if selected else self.colors["muted"],
+            activebackground=self.colors["success_soft"] if selected else self.colors["surface3"],
+            activeforeground=self.colors["success"] if selected else self.colors["text"],
+            highlightthickness=0,
             relief="flat",
         )
 
     def _build_daily_tab(self) -> None:
-        body = ttk.Frame(self.daily_tab, style="Page.TFrame")
-        body.pack(fill="both", expand=True)
-        controls_shell, controls = self._scrollable_panel(body)
-        results = ttk.Frame(body, style="Page.TFrame")
-        body.columnconfigure(0, minsize=360, weight=0)
-        body.columnconfigure(1, weight=1)
-        body.rowconfigure(0, weight=1)
-        controls_shell.grid(row=0, column=0, sticky="nsew")
-        results.grid(row=0, column=1, sticky="nsew", padx=(8, 18), pady=(0, 14))
-        results.rowconfigure(1, weight=1)
-        results.columnconfigure(0, weight=1)
+        shell, body = self._scrollable_workspace(self.daily_tab, min_width=1080)
+        shell.pack(fill="both", expand=True)
+        body.columnconfigure(0, weight=1)
 
-        self._page_header(controls, "每日雷达", "每天快速查看 arXiv 和顶级期刊的新论文，按当前研究方向自动评分。")
-        metrics = self._card(controls, "状态")
-        metrics.pack(fill="x", padx=18, pady=4)
-        metric_row = ttk.Frame(metrics, style="Card.TFrame")
-        metric_row.pack(fill="x")
-        self.daily_last_var = tk.StringVar(value="上次检查：从未")
-        self.daily_found_var = tk.StringVar(value="本次发现：0")
-        self.daily_high_var = tk.StringVar(value="高相关：0")
-        self.daily_skim_var = tk.StringVar(value="值得扫读：0")
-        self.daily_status_var = tk.StringVar(value="就绪")
+        hero = self._card(body)
+        hero.pack(fill="x", padx=18, pady=(18, 10))
+        hero.columnconfigure(0, weight=1)
+        hero_left = ttk.Frame(hero, style="Card.TFrame")
+        hero_left.grid(row=0, column=0, sticky="ew")
+        ttk.Label(hero_left, text="\u4eca\u65e5\u53d1\u73b0", style="HeroTitle.TLabel").pack(anchor="w")
+        ttk.Label(hero_left, text="\u628a\u65b0\u8bba\u6587\u3001\u76f8\u5173\u6027\u8bc4\u5206\u548c\u53ef\u8bfb\u6458\u8981\u96c6\u4e2d\u5230\u4e00\u4e2a\u5de5\u4f5c\u53f0\u3002\u5148\u8fd0\u884c\u68c0\u7d22\uff0c\u518d\u7b5b\u9009\u9700\u8981\u7cbe\u8bfb\u7684\u7ed3\u679c\u3002", style="Muted.TLabel", wraplength=680, justify="left").pack(anchor="w", pady=(6, 0))
+        hero_actions = ttk.Frame(hero, style="Card.TFrame")
+        hero_actions.grid(row=0, column=1, sticky="e", padx=(20, 0))
+        self.daily_run_btn = ttk.Button(hero_actions, text="\u7acb\u5373\u68c0\u67e5", style="Primary.TButton", command=self.run_daily)
+        self.daily_stop_btn = ttk.Button(hero_actions, text="\u505c\u6b62", style="Danger.TButton", command=self.stop_daily, state="disabled")
+        self.daily_run_btn.pack(side="left", padx=(0, 8))
+        self.daily_stop_btn.pack(side="left")
+
+        metrics = ttk.Frame(body, style="Workspace.TFrame")
+        metrics.pack(fill="x", padx=18, pady=(0, 10))
+        for index in range(5):
+            metrics.columnconfigure(index, weight=1, uniform="metric")
+        self.daily_last_var = tk.StringVar(value="\u4e0a\u6b21\u68c0\u67e5\uff1a\u4ece\u672a")
+        self.daily_found_var = tk.StringVar(value="\u672c\u6b21\u53d1\u73b0\uff1a0")
+        self.daily_high_var = tk.StringVar(value="\u9ad8\u76f8\u5173\uff1a0")
+        self.daily_skim_var = tk.StringVar(value="\u503c\u5f97\u626b\u8bfb\uff1a0")
+        self.daily_status_var = tk.StringVar(value="\u5c31\u7eea")
         for index, var in enumerate([self.daily_last_var, self.daily_found_var, self.daily_high_var, self.daily_skim_var, self.daily_status_var]):
-            label = ttk.Label(metric_row, textvariable=var, style="Metric.TLabel", wraplength=430)
-            label.grid(row=index, column=0, sticky="ew", pady=(0, 8))
-        metric_row.columnconfigure(0, weight=1)
+            card = self._card(metrics)
+            card.grid(row=0, column=index, sticky="nsew", padx=(0, 8 if index < 4 else 0))
+            ttk.Label(card, textvariable=var, style="Metric.TLabel", wraplength=185).pack(fill="x")
 
-        settings = self._card(controls, "检索设置")
-        settings.pack(fill="x", padx=18, pady=4)
-        row = ttk.Frame(settings, style="Card.TFrame")
-        row.pack(fill="x")
-        score_row = ttk.Frame(settings, style="Card.TFrame")
-        score_row.pack(fill="x", pady=(8, 0))
-        source_row = ttk.Frame(settings, style="Card.TFrame")
-        source_row.pack(fill="x", pady=(8, 0))
+        control_grid = ttk.Frame(body, style="Workspace.TFrame")
+        control_grid.pack(fill="x", padx=18, pady=(0, 10))
+        control_grid.columnconfigure(0, weight=2)
+        control_grid.columnconfigure(1, weight=2)
+        control_grid.columnconfigure(2, weight=3)
+
+        settings = self._card(control_grid, "\u68c0\u7d22\u53c2\u6570")
+        settings.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         self.daily_days_var = tk.StringVar(value=str(min(int(self.settings.get("days_back", 7)), 30)))
         self.daily_min_score_var = tk.IntVar(value=20)
-        self.daily_arxiv_var = tk.BooleanVar(value=True)
-        self.daily_top_journals_var = tk.BooleanVar(value=True)
-        self._labeled_combo(row, "检索最近天数", self.daily_days_var, ["1", "3", "7", "14", "30"]).pack(side="left", fill="x", expand=True, padx=(0, 10))
-        self._labeled_spin(score_row, "显示最低分", self.daily_min_score_var, 20, 100).pack(side="left", fill="x", expand=True, padx=(0, 10))
-        self._check_pill(source_row, "预印本（arXiv）", self.daily_arxiv_var).pack(fill="x", pady=(0, 8))
-        self._check_pill(source_row, "顶级期刊", self.daily_top_journals_var).pack(fill="x")
-        self.daily_min_score_var.trace_add("write", lambda *_: self.refresh_daily_display())
-
-        actions = ttk.Frame(controls, style="Page.TFrame")
-        actions.pack(fill="x", padx=18, pady=4)
-        self.daily_run_btn = ttk.Button(actions, text="立即检查", style="Primary.TButton", command=self.run_daily)
-        self.daily_stop_btn = ttk.Button(actions, text="停止", style="Danger.TButton", command=self.stop_daily, state="disabled")
-        action_row = ttk.Frame(actions, style="Page.TFrame")
-        action_row.pack(fill="x")
-        secondary_row = ttk.Frame(actions, style="Page.TFrame")
-        secondary_row.pack(fill="x", pady=(8, 0))
-        for button in [self.daily_run_btn, self.daily_stop_btn]:
-            button.pack(in_=action_row, side="left", fill="x", expand=True, padx=(0, 8))
-        for button in [
-            ttk.Button(secondary_row, text="生成今日报告", style="Secondary.TButton", command=self.generate_daily_report),
-            ttk.Button(secondary_row, text="打开报告文件夹", style="Secondary.TButton", command=self.open_report_folder),
-            ttk.Button(secondary_row, text="查看检索范围", style="Secondary.TButton", command=lambda: self.show_search_scope("daily")),
-        ]:
-            button.pack(fill="x", pady=(0, 8))
-
-        progress = self._card(controls, "进度")
-        progress.pack(fill="x", padx=18, pady=4)
-        self.daily_progress = ttk.Progressbar(progress, maximum=1)
-        self.daily_progress.pack(fill="x")
-        self.daily_progress_var = tk.StringVar(value="就绪")
-        ttk.Label(progress, textvariable=self.daily_progress_var, style="Metric.TLabel", wraplength=430).pack(fill="x", pady=(8, 0))
-
-        self._research_focus_strip(results, "daily")
-        self._build_result_tools(results, "daily")
-        self.daily_tree, self.daily_detail_text = self._build_results_area(results, "daily")
-
-    def _build_survey_tab(self) -> None:
-        body = ttk.Frame(self.survey_tab, style="Page.TFrame")
-        body.pack(fill="both", expand=True)
-        controls_shell, controls = self._scrollable_panel(body)
-        results = ttk.Frame(body, style="Page.TFrame")
-        body.columnconfigure(0, minsize=360, weight=0)
-        body.columnconfigure(1, weight=1)
-        body.rowconfigure(0, weight=1)
-        controls_shell.grid(row=0, column=0, sticky="nsew")
-        results.grid(row=0, column=1, sticky="nsew", padx=(8, 18), pady=(0, 14))
-        results.rowconfigure(1, weight=1)
-        results.columnconfigure(0, weight=1)
-
-        self._page_header(controls, "历史调研", "系统检索一段时间内的相关论文，适合开题、综述和研究趋势回看。")
-        settings = self._card(controls, "调研设置")
-        settings.pack(fill="x", padx=18, pady=4)
         row = ttk.Frame(settings, style="Card.TFrame")
         row.pack(fill="x")
-        range_row = ttk.Frame(settings, style="Card.TFrame")
-        range_row.pack(fill="x", pady=(8, 0))
-        score_row = ttk.Frame(settings, style="Card.TFrame")
-        score_row.pack(fill="x", pady=(8, 0))
-        self.survey_name_var = tk.StringVar(value="当前方向历史调研")
-        self.survey_range_var = tk.StringVar(value="最近 365 天")
+        self._labeled_combo(row, "\u6700\u8fd1\u5929\u6570", self.daily_days_var, ["1", "3", "7", "14", "30"]).pack(side="left", padx=(0, 10))
+        self._labeled_spin(row, "\u6700\u4f4e\u5206", self.daily_min_score_var, 20, 100).pack(side="left")
+        self.daily_min_score_var.trace_add("write", lambda *_: self.refresh_daily_display())
+
+        sources = self._card(control_grid, "\u6570\u636e\u6765\u6e90")
+        sources.grid(row=0, column=1, sticky="nsew", padx=(0, 10))
+        self.daily_arxiv_var = tk.BooleanVar(value=True)
+        self.daily_top_journals_var = tk.BooleanVar(value=True)
+        self._check_pill(sources, "\u9884\u5370\u672c\uff08arXiv\uff09", self.daily_arxiv_var).pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self._check_pill(sources, "\u9876\u7ea7\u671f\u520a", self.daily_top_journals_var).pack(side="left", fill="x", expand=True)
+
+        progress = self._card(control_grid, "\u8fd0\u884c\u72b6\u6001")
+        progress.grid(row=0, column=2, sticky="nsew")
+        self.daily_progress = ttk.Progressbar(progress, maximum=1)
+        self.daily_progress_var = tk.StringVar(value="\u5c31\u7eea")
+        ttk.Label(progress, textvariable=self.daily_progress_var, style="Muted.TLabel", wraplength=440).pack(anchor="w", fill="x", pady=(8, 0))
+
+        quick = self._card(body, "\u5e38\u7528\u64cd\u4f5c")
+        quick.pack(fill="x", padx=18, pady=(0, 10))
+        for button in [
+            ttk.Button(quick, text="\u751f\u6210\u4eca\u65e5\u62a5\u544a", style="Secondary.TButton", command=self.generate_daily_report),
+            ttk.Button(quick, text="\u6253\u5f00\u62a5\u544a\u6587\u4ef6\u5939", style="Secondary.TButton", command=self.open_report_folder),
+            ttk.Button(quick, text="\u67e5\u770b\u68c0\u7d22\u8303\u56f4", style="Secondary.TButton", command=lambda: self.show_search_scope("daily")),
+        ]:
+            button.pack(side="left", padx=(0, 8))
+
+        self._research_focus_strip(body, "daily")
+        self._build_result_tools(body, "daily")
+        self.daily_tree, self.daily_detail_text = self._build_results_area(body, "daily")
+
+    def _build_survey_tab(self) -> None:
+        shell, body = self._scrollable_workspace(self.survey_tab, min_width=1080)
+        shell.pack(fill="both", expand=True)
+        body.columnconfigure(0, weight=1)
+
+        hero = self._card(body)
+        hero.pack(fill="x", padx=18, pady=(18, 10))
+        hero.columnconfigure(0, weight=1)
+        hero_left = ttk.Frame(hero, style="Card.TFrame")
+        hero_left.grid(row=0, column=0, sticky="ew")
+        ttk.Label(hero_left, text="\u5386\u53f2\u8c03\u7814", style="HeroTitle.TLabel").pack(anchor="w")
+        ttk.Label(hero_left, text="\u9762\u5411\u5f00\u9898\u3001\u7efc\u8ff0\u548c\u65b9\u5411\u590d\u76d8\u7684\u6279\u91cf\u68c0\u7d22\u5de5\u4f5c\u533a\u3002\u7ed3\u679c\u4f1a\u6301\u7eed\u5165\u5e93\uff0c\u505c\u6b62\u540e\u5df2\u4fdd\u5b58\u5185\u5bb9\u4ecd\u4fdd\u7559\u3002", style="Muted.TLabel", wraplength=680, justify="left").pack(anchor="w", pady=(6, 0))
+        hero_actions = ttk.Frame(hero, style="Card.TFrame")
+        hero_actions.grid(row=0, column=1, sticky="e", padx=(20, 0))
+        self.survey_run_btn = ttk.Button(hero_actions, text="\u5f00\u59cb\u8c03\u7814", style="Primary.TButton", command=self.run_survey)
+        self.survey_stop_btn = ttk.Button(hero_actions, text="\u505c\u6b62", style="Danger.TButton", command=self.stop_survey, state="disabled")
+        self.survey_run_btn.pack(side="left", padx=(0, 8))
+        self.survey_stop_btn.pack(side="left")
+
+        control_grid = ttk.Frame(body, style="Workspace.TFrame")
+        control_grid.pack(fill="x", padx=18, pady=(0, 10))
+        for index in range(3):
+            control_grid.columnconfigure(index, weight=1, uniform="survey_controls")
+
+        settings = self._card(control_grid, "\u8c03\u7814\u53c2\u6570")
+        settings.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        self.survey_name_var = tk.StringVar(value="\u5f53\u524d\u65b9\u5411\u5386\u53f2\u8c03\u7814")
+        self.survey_range_var = tk.StringVar(value="\u6700\u8fd1 365 \u5929")
         self.survey_min_score_var = tk.IntVar(value=20)
-        self._labeled_entry(row, "调研名称", self.survey_name_var, 24).pack(side="left", fill="x", expand=True, padx=(0, 10))
-        self._labeled_combo(range_row, "时间范围", self.survey_range_var, ["最近 90 天", "最近 365 天", "最近 3 年"]).pack(side="left", fill="x", expand=True, padx=(0, 10))
-        self._labeled_spin(score_row, "显示最低分", self.survey_min_score_var, 20, 100).pack(side="left", fill="x", expand=True, padx=(0, 10))
-        source_row = ttk.Frame(settings, style="Card.TFrame")
-        source_row.pack(fill="x", pady=(8, 0))
-        self.survey_arxiv_var = tk.BooleanVar(value=False)
-        self.survey_top_journals_var = tk.BooleanVar(value=True)
-        self.survey_ignore_cache_var = tk.BooleanVar(value=False)
-        self._check_pill(source_row, "预印本（arXiv）", self.survey_arxiv_var).pack(fill="x", pady=(0, 8))
-        self._check_pill(source_row, "顶级期刊", self.survey_top_journals_var).pack(fill="x", pady=(0, 8))
-        self._check_pill(source_row, "忽略缓存", self.survey_ignore_cache_var).pack(fill="x")
+        self._labeled_entry(settings, "\u540d\u79f0", self.survey_name_var, 22).pack(fill="x", pady=(0, 8))
+        row = ttk.Frame(settings, style="Card.TFrame")
+        row.pack(fill="x")
+        self._labeled_combo(row, "\u8303\u56f4", self.survey_range_var, ["\u6700\u8fd1 90 \u5929", "\u6700\u8fd1 365 \u5929", "\u6700\u8fd1 3 \u5e74"]).pack(side="left", padx=(0, 10))
+        self._labeled_spin(row, "\u6700\u4f4e\u5206", self.survey_min_score_var, 20, 100).pack(side="left")
         self.survey_min_score_var.trace_add("write", lambda *_: self.refresh_survey_display())
 
-        actions = ttk.Frame(controls, style="Page.TFrame")
-        actions.pack(fill="x", padx=18, pady=4)
-        self.survey_run_btn = ttk.Button(actions, text="开始调研", style="Primary.TButton", command=self.run_survey)
-        self.survey_stop_btn = ttk.Button(actions, text="停止", style="Danger.TButton", command=self.stop_survey, state="disabled")
-        action_row = ttk.Frame(actions, style="Page.TFrame")
-        action_row.pack(fill="x")
-        secondary_row = ttk.Frame(actions, style="Page.TFrame")
-        secondary_row.pack(fill="x", pady=(8, 0))
-        for button in [self.survey_run_btn, self.survey_stop_btn]:
-            button.pack(in_=action_row, side="left", fill="x", expand=True, padx=(0, 8))
-        for button in [
-            ttk.Button(secondary_row, text="生成调研报告", style="Secondary.TButton", command=self.generate_survey_report),
-            ttk.Button(secondary_row, text="打开报告文件夹", style="Secondary.TButton", command=self.open_report_folder),
-            ttk.Button(secondary_row, text="查看检索范围", style="Secondary.TButton", command=lambda: self.show_search_scope("survey")),
-        ]:
-            button.pack(fill="x", pady=(0, 8))
+        sources = self._card(control_grid, "\u6570\u636e\u6765\u6e90")
+        sources.grid(row=0, column=1, sticky="nsew", padx=(0, 10))
+        self.survey_arxiv_var = tk.BooleanVar(value=False)
+        self.survey_top_journals_var = tk.BooleanVar(value=True)
+        self._check_pill(sources, "\u9884\u5370\u672c\uff08arXiv\uff09", self.survey_arxiv_var).pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self._check_pill(sources, "\u9876\u7ea7\u671f\u520a", self.survey_top_journals_var).pack(side="left", fill="x", expand=True)
 
-        progress = self._card(controls, "进度")
-        progress.pack(fill="x", padx=18, pady=4)
+        progress = self._card(control_grid, "\u8fd0\u884c\u72b6\u6001")
+        progress.grid(row=0, column=2, sticky="nsew")
         self.survey_progress = ttk.Progressbar(progress, maximum=1)
-        self.survey_progress.pack(fill="x")
-        self.survey_status_var = tk.StringVar(value="就绪")
-        self.survey_counts_var = tk.StringVar(value="进度：0 / 0；已发现：0；去重后：0；命中：0；已显示：0；成功：0；失败：0；缓存：0；超时：0")
-        ttk.Label(progress, textvariable=self.survey_status_var, style="Metric.TLabel", wraplength=430).pack(fill="x", pady=(8, 4))
-        ttk.Label(progress, textvariable=self.survey_counts_var, style="Metric.TLabel", wraplength=430).pack(fill="x")
+        self.survey_status_var = tk.StringVar(value="\u5c31\u7eea；\u82e5\u4eca\u65e5\u5df2\u6709\u76f8\u540c\u8c03\u7814\u7f13\u5b58\uff0c\u5c06\u76f4\u63a5\u590d\u7528\u3002")
+        self.survey_counts_var = tk.StringVar(value="\u5173\u952e\u8fd0\u884c\u4fe1\u606f：\u5df2\u53d1\u73b0 0；\u6210\u529f 0；\u5931\u8d25 0；\u4eca\u65e5\u7f13\u5b58 0")
+        ttk.Label(progress, textvariable=self.survey_status_var, style="Muted.TLabel", wraplength=390).pack(anchor="w", fill="x", pady=(8, 4))
+        ttk.Label(progress, textvariable=self.survey_counts_var, style="Muted.TLabel", wraplength=390).pack(anchor="w", fill="x")
 
-        self._research_focus_strip(results, "survey")
-        self._build_result_tools(results, "survey")
-        self.survey_tree, self.survey_detail_text = self._build_results_area(results, "survey")
+        quick = self._card(body, "\u5e38\u7528\u64cd\u4f5c")
+        quick.pack(fill="x", padx=18, pady=(0, 10))
+        for button in [
+            ttk.Button(quick, text="\u751f\u6210\u8c03\u7814\u62a5\u544a", style="Secondary.TButton", command=self.generate_survey_report),
+            ttk.Button(quick, text="\u6253\u5f00\u62a5\u544a\u6587\u4ef6\u5939", style="Secondary.TButton", command=self.open_report_folder),
+            ttk.Button(quick, text="\u67e5\u770b\u68c0\u7d22\u8303\u56f4", style="Secondary.TButton", command=lambda: self.show_search_scope("survey")),
+        ]:
+            button.pack(side="left", padx=(0, 8))
+
+        self._research_focus_strip(body, "survey")
+        self._build_result_tools(body, "survey")
+        self.survey_tree, self.survey_detail_text = self._build_results_area(body, "survey")
 
     def _research_focus_strip(self, parent: ttk.Frame, prefix: str) -> None:
-        title = "??????" if prefix == "daily" else "??????"
+        title = "今日论文信号" if prefix == "daily" else "历史文献地图"
         message = (
-            "????????????????????????"
+            "先运行检索，再通过分数、来源和关键词快速收敛需要精读的论文。"
             if prefix == "daily"
-            else "?????????????????????????????"
+            else "用时间范围和最低分控制检索密度，适合做开题、综述和方向复盘。"
         )
         strip = ttk.Frame(parent, style="Card.TFrame", padding=(16, 10))
         strip.pack(fill="x", padx=18, pady=(10, 4))
@@ -907,46 +983,54 @@ class MainWindow(tk.Tk):
         ttk.Label(strip, text=message, style="Muted.TLabel", wraplength=760).pack(side="left", fill="x", expand=True)
 
     def _build_profile_tab(self) -> None:
-        self._page_header(self.profile_tab, "研究方向配置", "管理检索 Profile，生成外部 AI 提示词，并导入规范化后的研究方向配置。")
-        status = self._card(self.profile_tab, "当前 Profile")
-        status.pack(fill="x", padx=18, pady=4)
+        shell, body = self._scrollable_workspace(self.profile_tab, min_width=1120)
+        shell.pack(fill="both", expand=True)
+        body.columnconfigure(0, weight=1)
+
+        hero = self._card(body)
+        hero.pack(fill="x", padx=18, pady=(18, 10))
+        ttk.Label(hero, text="\u7814\u7a76\u65b9\u5411", style="HeroTitle.TLabel").pack(anchor="w")
+        ttk.Label(hero, text="\u7ba1\u7406 Profile\u3001\u5173\u952e\u8bcd\u548c AI \u8f85\u52a9\u5bfc\u5165\u3002\u5f53\u524d\u65b9\u5411\u4f1a\u51b3\u5b9a\u6bcf\u65e5\u53d1\u73b0\u548c\u5386\u53f2\u8c03\u7814\u7684\u68c0\u7d22\u4e0e\u8bc4\u5206\u3002", style="Muted.TLabel", wraplength=820, justify="left").pack(anchor="w", pady=(6, 0))
+
+        status = self._card(body, "\u5f53\u524d Profile")
+        status.pack(fill="x", padx=18, pady=(0, 10))
         self.profile_status_var = tk.StringVar(value="")
-        ttk.Label(status, textvariable=self.profile_status_var, style="Metric.TLabel", wraplength=1100).pack(fill="x")
+        ttk.Label(status, textvariable=self.profile_status_var, style="Metric.TLabel", wraplength=1040).pack(fill="x")
         actions = ttk.Frame(status, style="Card.TFrame")
         actions.pack(fill="x", pady=(10, 0))
         for button in [
-            ttk.Button(actions, text="设为当前方向", style="Primary.TButton", command=self.set_selected_profile_active),
-            ttk.Button(actions, text="复制当前 Profile", style="Secondary.TButton", command=self.copy_current_profile),
-            ttk.Button(actions, text="导出 Profile", style="Secondary.TButton", command=self.export_selected_profile),
-            ttk.Button(actions, text="删除 Profile", style="Danger.TButton", command=self.delete_selected_profile),
+            ttk.Button(actions, text="\u8bbe\u4e3a\u5f53\u524d\u65b9\u5411", style="Primary.TButton", command=self.set_selected_profile_active),
+            ttk.Button(actions, text="\u590d\u5236\u5f53\u524d Profile", style="Secondary.TButton", command=self.copy_current_profile),
+            ttk.Button(actions, text="\u5bfc\u51fa Profile", style="Secondary.TButton", command=self.export_selected_profile),
+            ttk.Button(actions, text="\u5220\u9664 Profile", style="Danger.TButton", command=self.delete_selected_profile),
         ]:
             button.pack(side="left", padx=(0, 8))
 
-        table_card = self._card(self.profile_tab)
-        table_card.pack(fill="both", expand=False, padx=18, pady=4)
-        self.profile_tree = ttk.Treeview(table_card, columns=("name", "id", "desc", "queries", "keywords", "active"), show="headings", height=5)
+        table_card = self._card(body, "Profile \u5217\u8868")
+        table_card.pack(fill="x", padx=18, pady=(0, 10))
+        self.profile_tree = ttk.Treeview(table_card, columns=("name", "id", "desc", "queries", "keywords", "active"), show="headings", height=4)
         for key, text, width in [
-            ("name", "显示名称", 160),
-            ("id", "Profile ID", 170),
-            ("desc", "描述", 340),
-            ("queries", "检索式", 80),
-            ("keywords", "关键词组", 320),
-            ("active", "当前", 70),
+            ("name", "\u663e\u793a\u540d\u79f0", 170),
+            ("id", "Profile ID", 180),
+            ("desc", "\u63cf\u8ff0", 360),
+            ("queries", "\u68c0\u7d22\u5f0f", 90),
+            ("keywords", "\u5173\u952e\u8bcd\u7ec4", 360),
+            ("active", "\u5f53\u524d", 80),
         ]:
             self.profile_tree.heading(key, text=text)
             self.profile_tree.column(key, width=width, anchor="center")
-        self.profile_tree.pack(fill="both", expand=True)
+        self.profile_tree.pack(fill="x")
         self.profile_tree.bind("<<TreeviewSelect>>", lambda _event: self._on_profile_selected())
         self.profile_tree.bind("<Double-1>", lambda _event: self._show_tree_cell_popup(self.profile_tree))
 
-        keyword_editor = self._card(self.profile_tab, "关键词工作台")
-        keyword_editor.pack(fill="both", expand=True, padx=18, pady=4)
-        self.keyword_editor_status_var = tk.StringVar(value="先选择研究方向；上方表格管理已有关键词，下方表单只用于新增关键词。")
-        ttk.Label(keyword_editor, textvariable=self.keyword_editor_status_var, style="Metric.TLabel", wraplength=1100).pack(fill="x", pady=(0, 8))
+        keyword_editor = self._card(body, "\u5173\u952e\u8bcd\u5de5\u4f5c\u53f0")
+        keyword_editor.pack(fill="both", expand=True, padx=18, pady=(0, 10))
+        self.keyword_editor_status_var = tk.StringVar(value="\u5148\u9009\u62e9\u7814\u7a76\u65b9\u5411\uff1b\u4e0a\u65b9\u8868\u683c\u7ba1\u7406\u5df2\u6709\u5173\u952e\u8bcd\uff0c\u4e0b\u65b9\u8868\u5355\u7528\u4e8e\u65b0\u589e\u5173\u952e\u8bcd\u3002")
+        ttk.Label(keyword_editor, textvariable=self.keyword_editor_status_var, style="Metric.TLabel", wraplength=1040).pack(fill="x", pady=(0, 8))
         editor_body = ttk.Frame(keyword_editor, style="Card.TFrame")
         editor_body.pack(fill="both", expand=True)
-        self.keyword_tree = ttk.Treeview(editor_body, columns=("group", "priority", "term"), show="headings", height=7)
-        for key, text, width in [("group", "分组", 170), ("priority", "权重", 90), ("term", "已有关键词", 560)]:
+        self.keyword_tree = ttk.Treeview(editor_body, columns=("group", "priority", "term"), show="headings", height=6)
+        for key, text, width in [("group", "\u5206\u7ec4", 180), ("priority", "\u6743\u91cd", 100), ("term", "\u5df2\u6709\u5173\u952e\u8bcd", 720)]:
             self.keyword_tree.heading(key, text=text)
             self.keyword_tree.column(key, width=width, anchor="w" if key == "term" else "center")
         self.keyword_tree.pack(side="left", fill="both", expand=True)
@@ -955,67 +1039,66 @@ class MainWindow(tk.Tk):
         keyword_scroll.pack(side="right", fill="y")
         self.keyword_tree.bind("<<TreeviewSelect>>", lambda _event: self._on_keyword_selected())
 
-        existing_card = ttk.Frame(keyword_editor, style="Card.TFrame")
-        existing_card.pack(fill="x", pady=(10, 0))
-        ttk.Label(existing_card, text="编辑已选关键词", style="Body.TLabel", font=("Microsoft YaHei UI", 10, "bold")).pack(anchor="w", pady=(0, 8))
+        edit_grid = ttk.Frame(keyword_editor, style="Card.TFrame")
+        edit_grid.pack(fill="x", pady=(10, 0))
+        edit_grid.columnconfigure(0, weight=1)
+        edit_grid.columnconfigure(1, weight=1)
+
+        existing_card = ttk.Frame(edit_grid, style="Card.TFrame")
+        existing_card.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        ttk.Label(existing_card, text="\u7f16\u8f91\u9009\u4e2d\u5173\u952e\u8bcd", style="Body.TLabel", font=("Microsoft YaHei UI", 10, "bold")).pack(anchor="w", pady=(0, 8))
         existing_row = ttk.Frame(existing_card, style="Card.TFrame")
         existing_row.pack(fill="x")
         self.keyword_group_var = tk.StringVar(value="core")
         self.keyword_priority_var = tk.StringVar(value="medium")
         self.keyword_term_var = tk.StringVar(value="")
-        self._labeled_entry(existing_row, "分组", self.keyword_group_var, 26).pack(side="left", padx=(0, 10))
-        self._labeled_combo(existing_row, "权重", self.keyword_priority_var, ["high", "medium", "low", "exclude"]).pack(side="left", padx=(0, 10))
-        self._labeled_entry(existing_row, "关键词", self.keyword_term_var, 34).pack(side="left", fill="x", expand=True, padx=(0, 10))
+        self._labeled_entry(existing_row, "\u5206\u7ec4", self.keyword_group_var, 16).pack(side="left", padx=(0, 8))
+        self._labeled_combo(existing_row, "\u6743\u91cd", self.keyword_priority_var, ["high", "medium", "low", "exclude"]).pack(side="left", padx=(0, 8))
+        self._labeled_entry(existing_row, "\u5173\u952e\u8bcd", self.keyword_term_var, 26).pack(side="left", fill="x", expand=True)
         existing_actions = ttk.Frame(existing_card, style="Card.TFrame")
         existing_actions.pack(fill="x", pady=(8, 0))
-        for button in [
-            ttk.Button(existing_actions, text="保存对选中项的修改", style="Primary.TButton", command=self.update_profile_keyword),
-            ttk.Button(existing_actions, text="删除选中关键词", style="Danger.TButton", command=self.delete_profile_keyword),
-        ]:
-            button.pack(side="left", padx=(0, 8))
+        ttk.Button(existing_actions, text="\u4fdd\u5b58\u4fee\u6539", style="Primary.TButton", command=self.update_profile_keyword).pack(side="left", padx=(0, 8))
+        ttk.Button(existing_actions, text="\u5220\u9664\u5173\u952e\u8bcd", style="Danger.TButton", command=self.delete_profile_keyword).pack(side="left")
 
-        add_card = ttk.Frame(keyword_editor, style="Card.TFrame")
-        add_card.pack(fill="x", pady=(12, 0))
-        ttk.Label(add_card, text="新增关键词", style="Body.TLabel", font=("Microsoft YaHei UI", 10, "bold")).pack(anchor="w", pady=(0, 8))
+        add_card = ttk.Frame(edit_grid, style="Card.TFrame")
+        add_card.grid(row=0, column=1, sticky="nsew")
+        ttk.Label(add_card, text="\u65b0\u589e\u5173\u952e\u8bcd", style="Body.TLabel", font=("Microsoft YaHei UI", 10, "bold")).pack(anchor="w", pady=(0, 8))
         add_row = ttk.Frame(add_card, style="Card.TFrame")
         add_row.pack(fill="x")
         self.new_keyword_group_var = tk.StringVar(value="core")
         self.new_keyword_priority_var = tk.StringVar(value="medium")
         self.new_keyword_term_var = tk.StringVar(value="")
-        self._labeled_entry(add_row, "分组", self.new_keyword_group_var, 26).pack(side="left", padx=(0, 10))
-        self._labeled_combo(add_row, "权重", self.new_keyword_priority_var, ["high", "medium", "low", "exclude"]).pack(side="left", padx=(0, 10))
-        self._labeled_entry(add_row, "新关键词", self.new_keyword_term_var, 34).pack(side="left", fill="x", expand=True, padx=(0, 10))
+        self._labeled_entry(add_row, "\u5206\u7ec4", self.new_keyword_group_var, 16).pack(side="left", padx=(0, 8))
+        self._labeled_combo(add_row, "\u6743\u91cd", self.new_keyword_priority_var, ["high", "medium", "low", "exclude"]).pack(side="left", padx=(0, 8))
+        self._labeled_entry(add_row, "\u65b0\u5173\u952e\u8bcd", self.new_keyword_term_var, 26).pack(side="left", fill="x", expand=True)
         add_actions = ttk.Frame(add_card, style="Card.TFrame")
         add_actions.pack(fill="x", pady=(8, 0))
-        for button in [
-            ttk.Button(add_actions, text="添加到列表", style="Secondary.TButton", command=self.add_profile_keyword),
-            ttk.Button(add_actions, text="保存全部关键词", style="Primary.TButton", command=self.save_keyword_editor_profile),
-        ]:
-            button.pack(side="left", padx=(0, 8))
+        ttk.Button(add_actions, text="\u6dfb\u52a0\u5230\u5217\u8868", style="Secondary.TButton", command=self.add_profile_keyword).pack(side="left", padx=(0, 8))
+        ttk.Button(add_actions, text="\u4fdd\u5b58\u5168\u90e8\u5173\u952e\u8bcd", style="Primary.TButton", command=self.save_keyword_editor_profile).pack(side="left")
 
-        prompt = self._card(self.profile_tab, "AI 提示词生成")
-        prompt.pack(fill="x", padx=18, pady=4)
+        prompt = self._card(body, "AI \u63d0\u793a\u8bcd\u751f\u6210")
+        prompt.pack(fill="x", padx=18, pady=(0, 10))
         prompt_row = ttk.Frame(prompt, style="Card.TFrame")
         prompt_row.pack(fill="x")
         self.profile_direction_var = tk.StringVar()
-        self._labeled_entry(prompt_row, "研究方向", self.profile_direction_var, 36).pack(side="left", fill="x", expand=True, padx=(0, 10))
-        ttk.Button(prompt_row, text="生成并复制 AI 提示词", style="Primary.TButton", command=self.generate_and_copy_profile_prompt).pack(side="left")
+        self._labeled_entry(prompt_row, "\u7814\u7a76\u65b9\u5411", self.profile_direction_var, 38).pack(side="left", fill="x", expand=True, padx=(0, 10))
+        ttk.Button(prompt_row, text="\u751f\u6210\u5e76\u590d\u5236 AI \u63d0\u793a\u8bcd", style="Primary.TButton", command=self.generate_and_copy_profile_prompt).pack(side="left")
 
-        importer = self._card(self.profile_tab, "Profile 粘贴导入")
-        importer.pack(fill="both", expand=True, padx=18, pady=4)
+        importer = self._card(body, "Profile \u6279\u91cf\u5bfc\u5165")
+        importer.pack(fill="both", expand=True, padx=18, pady=(0, 18))
         self.profile_yaml_text = scrolledtext.ScrolledText(importer, height=8, wrap="word", bg=self.colors["surface"], fg=self.colors["text"], insertbackground=self.colors["text"])
         self._style_text_widget(self.profile_yaml_text)
         self.profile_yaml_text.pack(fill="both", expand=True)
         import_actions = ttk.Frame(importer, style="Card.TFrame")
         import_actions.pack(fill="x", pady=(10, 8))
         for button in [
-            ttk.Button(import_actions, text="粘贴剪贴板内容", style="Secondary.TButton", command=self.paste_profile_yaml),
-            ttk.Button(import_actions, text="智能解析并预览", style="Primary.TButton", command=self.validate_profile_input),
-            ttk.Button(import_actions, text="保存并设为当前方向", style="Primary.TButton", command=lambda: self.save_validated_profile(make_active=True)),
+            ttk.Button(import_actions, text="\u7c98\u8d34\u526a\u8d34\u677f\u5185\u5bb9", style="Secondary.TButton", command=self.paste_profile_yaml),
+            ttk.Button(import_actions, text="\u89e3\u6790\u5e76\u9884\u89c8", style="Primary.TButton", command=self.validate_profile_input),
+            ttk.Button(import_actions, text="\u4fdd\u5b58\u5e76\u8bbe\u4e3a\u5f53\u524d\u65b9\u5411", style="Primary.TButton", command=lambda: self.save_validated_profile(make_active=True)),
         ]:
             button.pack(side="left", padx=(0, 8))
-        self.profile_validation_var = tk.StringVar(value="尚未校验")
-        ttk.Label(importer, textvariable=self.profile_validation_var, style="Metric.TLabel", wraplength=1100).pack(fill="x")
+        self.profile_validation_var = tk.StringVar(value="\u5c1a\u672a\u89e3\u6790\uff0c\u8bf7\u5148\u7c98\u8d34 Profile \u914d\u7f6e\u5e76\u70b9\u51fb\u89e3\u6790\u5e76\u9884\u89c8\u3002")
+        ttk.Label(importer, textvariable=self.profile_validation_var, style="Metric.TLabel", wraplength=1040).pack(fill="x")
 
     def _labeled_entry(self, parent: ttk.Frame, label: str, var: tk.StringVar, width: int) -> ttk.Frame:
         frame = ttk.Frame(parent, style="Card.TFrame")
@@ -1030,8 +1113,8 @@ class MainWindow(tk.Tk):
             frame,
             textvariable=var,
             bd=0,
-            padx=14,
-            pady=8,
+            padx=18,
+            pady=10,
             width=max(9, min(14, max((len(str(value)) for value in values), default=7) + 2)),
             cursor="hand2",
             font=("Microsoft YaHei UI", 10, "bold"),
@@ -1051,20 +1134,23 @@ class MainWindow(tk.Tk):
         return frame
 
     def _build_result_tools(self, parent: ttk.Frame, prefix: str) -> None:
-        tools = self._card(parent, "结果筛选与趋势")
-        tools.pack(fill="x", padx=18, pady=4)
+        tools = self._card(parent, "结果筛选")
+        tools.pack(fill="x", padx=18, pady=(10, 6))
         top = ttk.Frame(tools, style="Card.TFrame")
         top.pack(fill="x")
         search_var = tk.StringVar()
         source_var = tk.StringVar(value="全部来源")
-        ttk.Label(top, text="快速搜索", style="Body.TLabel").pack(side="left", padx=(0, 6))
-        search_entry = ttk.Entry(top, textvariable=search_var, width=52)
-        search_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        ttk.Label(top, text="关键词", style="Body.TLabel").pack(side="left", padx=(0, 8))
+        search_entry = ttk.Entry(top, textvariable=search_var, width=48)
+        search_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
         search_entry.bind("<Return>", lambda _event, p=prefix: self._direct_search(p))
-        ttk.Button(top, text="搜索", style="Primary.TButton", command=lambda p=prefix: self._direct_search(p)).pack(side="left", padx=(0, 12))
+        self._labeled_combo(top, "来源", source_var, ["全部来源", "预印本（arXiv）", "顶级期刊"]).pack(side="left", padx=(0, 10))
+        ttk.Button(top, text="运行检索", style="Primary.TButton", command=lambda p=prefix: self._direct_search(p)).pack(side="left", padx=(0, 8))
+        ttk.Button(top, text="清空", style="Secondary.TButton", command=lambda p=prefix: self._clear_result_filters(p)).pack(side="left")
+
         bottom = ttk.Frame(tools, style="Card.TFrame")
-        bottom.pack(fill="x", pady=(10, 0))
-        summary_var = tk.StringVar(value="搜索到的文献：0；高相关（>80分）：0")
+        bottom.pack(fill="x", pady=(12, 0))
+        summary_var = tk.StringVar(value="当前显示 0 篇；高相关 0 篇")
         signal_var = tk.StringVar(value="")
         ttk.Label(bottom, textvariable=summary_var, style="Metric.TLabel").pack(side="left", fill="x", expand=True)
         if prefix == "daily":
@@ -1073,12 +1159,24 @@ class MainWindow(tk.Tk):
             self.daily_summary_var = summary_var
             self.daily_signal_var = signal_var
             search_var.trace_add("write", lambda *_: self.refresh_daily_display())
+            source_var.trace_add("write", lambda *_: self.refresh_daily_display())
         else:
             self.survey_filter_var = search_var
             self.survey_source_filter_var = source_var
             self.survey_summary_var = summary_var
             self.survey_signal_var = signal_var
             search_var.trace_add("write", lambda *_: self.refresh_survey_display())
+            source_var.trace_add("write", lambda *_: self.refresh_survey_display())
+
+    def _clear_result_filters(self, prefix: str) -> None:
+        if prefix == "daily":
+            self.daily_filter_var.set("")
+            self.daily_source_filter_var.set("全部来源")
+            self.refresh_daily_display()
+        else:
+            self.survey_filter_var.set("")
+            self.survey_source_filter_var.set("全部来源")
+            self.refresh_survey_display()
 
     def _direct_search(self, prefix: str) -> None:
         if prefix == "daily":
@@ -1093,61 +1191,69 @@ class MainWindow(tk.Tk):
     def _build_results_area(self, parent: ttk.Frame, prefix: str) -> tuple[ttk.Treeview, tk.Text]:
         outer = ttk.Frame(parent, style="Page.TFrame")
         outer.pack(fill="both", expand=True, padx=18, pady=(4, 0))
-        outer.rowconfigure(0, weight=4)
-        outer.rowconfigure(1, weight=3)
+        outer.rowconfigure(0, weight=3)
+        outer.rowconfigure(1, weight=2)
         outer.columnconfigure(0, weight=1)
-        table_card = ttk.Frame(outer, style="Table.TFrame", padding=(1, 1))
-        table_card.grid(row=0, column=0, sticky="nsew", pady=(0, 8))
-        tree = ttk.Treeview(table_card, columns=RESULT_COLUMNS, show="headings", height=12)
+
+        table_card = ttk.Frame(outer, style="Table.TFrame", padding=(12, 10))
+        table_card.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
+        table_title = "\u4eca\u65e5\u8bba\u6587\u5217\u8868" if prefix == "daily" else "\u5386\u53f2\u8c03\u7814\u7ed3\u679c"
+        ttk.Label(table_card, text=table_title, style="Title.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
+        tree = ttk.Treeview(table_card, columns=RESULT_COLUMNS, show="headings", height=8)
         headings = {
-            "score": "分数",
-            "source": "来源",
-            "type": "来源类型",
-            "title": "标题",
-            "authors": "作者",
-            "date": "发布日期",
-            "keywords": "命中关键词",
-            "link": "链接",
+            "score": "\u5206\u6570",
+            "source": "\u6765\u6e90",
+            "type": "\u7c7b\u578b",
+            "title": "\u6807\u9898",
+            "authors": "\u4f5c\u8005",
+            "date": "\u53d1\u5e03\u65e5\u671f",
+            "keywords": "\u547d\u4e2d\u5173\u952e\u8bcd",
+            "action": "\u64cd\u4f5c",
         }
-        widths = {"score": 72, "source": 132, "type": 118, "title": 460, "authors": 240, "date": 122, "keywords": 240, "link": 320}
+        widths = {"score": 72, "source": 128, "type": 112, "title": 500, "authors": 220, "date": 118, "keywords": 260, "action": 92}
         for col in RESULT_COLUMNS:
             tree.heading(col, text=headings[col], command=lambda c=col: self._sort_tree(tree, c, False))
-            anchor = "w" if col in {"title", "authors", "keywords", "link"} else "center"
-            tree.column(col, width=widths[col], minwidth=120 if col == "link" else 64, anchor=anchor, stretch=False)
+            anchor = "w" if col in {"title", "authors", "keywords"} else "center"
+            tree.column(col, width=widths[col], minwidth=76, anchor=anchor, stretch=False)
         yscroll = ttk.Scrollbar(table_card, orient="vertical", style="Vertical.TScrollbar", command=tree.yview)
         xscroll = ttk.Scrollbar(table_card, orient="horizontal", style="Horizontal.TScrollbar", command=tree.xview)
         tree.configure(yscrollcommand=yscroll.set, xscrollcommand=xscroll.set)
-        tree.grid(row=0, column=0, sticky="nsew")
-        yscroll.grid(row=0, column=1, sticky="ns", padx=(6, 0))
-        xscroll.grid(row=1, column=0, sticky="ew", pady=(6, 0))
-        table_card.rowconfigure(0, weight=1)
-        table_card.rowconfigure(1, weight=0)
+        tree.grid(row=1, column=0, sticky="nsew")
+        yscroll.grid(row=1, column=1, sticky="ns", padx=(8, 0))
+        xscroll.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        table_card.rowconfigure(1, weight=1)
         table_card.columnconfigure(0, weight=1)
         tree.tag_configure("odd", background=self.colors["table_alt"])
-        tree.tag_configure("high", background="#28569f")
-        tree.tag_configure("skim", background="#1d5d73")
+        tree.tag_configure("high", background=self.colors["success_soft"], foreground=self.colors["text"])
+        tree.tag_configure("skim", background=self.colors["warning_soft"], foreground=self.colors["text"])
+        tree.tag_configure("empty", background=self.colors["surface"], foreground=self.colors["muted"])
         tree.bind("<<TreeviewSelect>>", lambda _event, t=tree, p=prefix: self._select_result(t, p))
         tree.bind("<ButtonRelease-1>", lambda event, t=tree: self._open_tree_link_on_click(event, t), add="+")
         tree.bind("<Double-1>", lambda _event, t=tree: self._open_selected_tree_link(t))
 
-        detail_card = ttk.Frame(outer, style="Card.TFrame", padding=(14, 12))
+        detail_card = ttk.Frame(outer, style="Card.TFrame", padding=(18, 14))
         detail_card.grid(row=1, column=0, sticky="nsew")
-        title_var = tk.StringVar(value="选择一篇论文查看详情")
-        meta_var = tk.StringVar(value="")
+        title_var = tk.StringVar(value="\u9009\u62e9\u4e00\u7bc7\u8bba\u6587\u540e\uff0c\u8fd9\u91cc\u4f1a\u663e\u793a\u8bba\u6587\u8be6\u60c5")
+        meta_var = tk.StringVar(value="\u6458\u8981\u3001\u547d\u4e2d\u5173\u952e\u8bcd\u3001\u8bc4\u5206\u4f9d\u636e\u548c\u5916\u90e8\u94fe\u63a5\u4f1a\u5728\u8fd9\u91cc\u96c6\u4e2d\u5448\u73b0\u3002")
         if prefix == "daily":
             self.daily_detail_title_var = title_var
             self.daily_detail_meta_var = meta_var
         else:
             self.survey_detail_title_var = title_var
             self.survey_detail_meta_var = meta_var
-        ttk.Label(detail_card, textvariable=title_var, style="Title.TLabel", wraplength=1100).pack(anchor="w")
-        ttk.Label(detail_card, textvariable=meta_var, style="Muted.TLabel", wraplength=1100).pack(anchor="w", pady=(4, 8))
-        text = tk.Text(detail_card, height=10, wrap="word", bg=self.colors["surface"], fg=self.colors["text"], insertbackground=self.colors["text"])
-        text.insert("1.0", "点击任意结果行，可在这里查看摘要、相关说明和评分拆解。")
+        ttk.Label(detail_card, textvariable=title_var, style="DetailTitle.TLabel", wraplength=1120, justify="left").pack(anchor="w")
+        ttk.Label(detail_card, textvariable=meta_var, style="Muted.TLabel", wraplength=1120, justify="left").pack(anchor="w", pady=(6, 10))
+        text = tk.Text(detail_card, height=7, wrap="word", bg=self.colors["surface"], fg=self.colors["text"], insertbackground=self.colors["text"])
+        text.insert("1.0", "\u672a\u9009\u62e9\u8bba\u6587\u3002\u8bf7\u5728\u4e0a\u65b9\u5217\u8868\u4e2d\u9009\u62e9\u4e00\u7bc7\u8bba\u6587\uff0cPaperRadar \u4f1a\u663e\u793a\u6458\u8981\u3001\u5173\u952e\u8bcd\u547d\u4e2d\u548c\u8bc4\u5206\u62c6\u89e3\u3002")
         text.configure(state="disabled")
         self._style_text_widget(text)
         text.pack(fill="both", expand=True)
-        ttk.Button(detail_card, text="打开链接", style="Secondary.TButton", command=self.open_selected_link).pack(anchor="e", pady=(8, 0))
+        actions = ttk.Frame(detail_card, style="Card.TFrame")
+        actions.pack(fill="x", pady=(10, 0))
+        ttk.Button(actions, text="\u6253\u5f00\u94fe\u63a5", style="Secondary.TButton", command=self.open_selected_link).pack(side="left", padx=(0, 8))
+        ttk.Button(actions, text="\u590d\u5236\u5f15\u7528\uff08\u5373\u5c06\u652f\u6301\uff09", style="Secondary.TButton", state="disabled").pack(side="left", padx=(0, 8))
+        ttk.Button(actions, text="\u52a0\u5165\u5173\u6ce8\uff08\u5373\u5c06\u652f\u6301\uff09", style="Secondary.TButton", state="disabled").pack(side="left", padx=(0, 8))
+        ttk.Button(actions, text="\u52a0\u5165\u62a5\u544a\uff08\u5373\u5c06\u652f\u6301\uff09", style="Secondary.TButton", state="disabled").pack(side="left")
         return tree, text
 
     def _emit(self, *message: Any) -> None:
@@ -1267,7 +1373,6 @@ class MainWindow(tk.Tk):
             from_date,
             until_date,
             sources,
-            self.survey_ignore_cache_var.get(),
             self.settings,
             self._emit,
             self.stop_survey_event.is_set,
@@ -1355,35 +1460,42 @@ class MainWindow(tk.Tk):
             return paper.source_type == "arxiv"
         if label == "顶级期刊":
             return paper.source_type in {"crossref", "journal_rss"}
-        if label == "Crossref":
-            return paper.source_type == "crossref"
-        if label == "期刊 RSS":
-            return paper.source_type == "journal_rss"
         return True
 
     def _update_result_summary(self, prefix: str, visible: int, filtered_base: int, total: int) -> None:
         target = self.daily_summary_var if prefix == "daily" else self.survey_summary_var
-        target.set(f"\u641c\u7d22\u5230\u7684\u6587\u732e\uff1a{visible}\uff1b\u9ad8\u76f8\u5173\uff08>80\u5206\uff09\uff1a0")
+        high_count = sum(1 for paper in (self.daily_papers if prefix == "daily" else self.survey_papers) if paper.relevance_score > 80)
+        hidden = max(filtered_base - visible, 0)
+        target.set(f"当前显示 {visible} 篇；高相关 {high_count} 篇；筛选隐藏 {hidden} 篇；候选库 {total} 篇")
 
     def _update_signal_panel(self, prefix: str, papers: list[Paper]) -> None:
         target = self.daily_summary_var if prefix == "daily" else self.survey_summary_var
         high_count = sum(1 for paper in papers if paper.relevance_score > 80)
-        target.set(f"\u641c\u7d22\u5230\u7684\u6587\u732e\uff1a{len(papers)}\uff1b\u9ad8\u76f8\u5173\uff08>80\u5206\uff09\uff1a{high_count}")
+        target.set(f"当前显示 {len(papers)} 篇；高相关 {high_count} 篇")
         (self.daily_signal_var if prefix == "daily" else self.survey_signal_var).set("")
 
     def populate_table(self, tree: ttk.Treeview, papers: list[Paper]) -> None:
         for item in tree.get_children():
             tree.delete(item)
+        if not papers:
+            tree.insert(
+                "",
+                "end",
+                iid="empty",
+                values=("", "", "", "\u8fd8\u6ca1\u6709\u7b26\u5408\u6761\u4ef6\u7684\u8bba\u6587", "\u8fd0\u884c\u68c0\u7d22\u6216\u653e\u5bbd\u7b5b\u9009\u6761\u4ef6\u540e\u518d\u67e5\u770b", "", "", ""),
+                tags=("empty",),
+            )
+            return
         for index, paper in enumerate(papers):
             values = (
-                int(paper.relevance_score),
-                paper.journal_or_source or "未知",
+                f"{int(paper.relevance_score)}",
+                paper.journal_or_source or "\u672a\u77e5",
                 self._source_type_label(paper.source_type),
                 paper.title,
                 paper.authors,
                 format_date_only(paper.published_date),
                 paper.matched_keywords_text,
-                paper.url or "无链接",
+                "\u6253\u5f00" if paper.url else "\u65e0\u94fe\u63a5",
             )
             if paper.relevance_score >= 60:
                 tags = ("high",)
@@ -1397,6 +1509,8 @@ class MainWindow(tk.Tk):
         selection = tree.selection()
         if not selection:
             return
+        if selection[0] == "empty":
+            return
         index = int(selection[0])
         papers = self.daily_papers if prefix == "daily" else self.survey_papers
         if index >= len(papers):
@@ -1408,17 +1522,19 @@ class MainWindow(tk.Tk):
         title_var = self.daily_detail_title_var if prefix == "daily" else self.survey_detail_title_var
         meta_var = self.daily_detail_meta_var if prefix == "daily" else self.survey_detail_meta_var
         text = self.daily_detail_text if prefix == "daily" else self.survey_detail_text
-        title_var.set(f"分数 {int(paper.relevance_score)} · {paper.title or '未命名论文'}")
+        doi_state = "\u5df2\u6536\u5f55 DOI" if paper.doi else "\u6682\u65e0 DOI"
+        title_var.set(paper.title or "\u672a\u547d\u540d\u8bba\u6587")
         meta_var.set(
-            f"作者：{paper.authors or '未知'}\n来源：{paper.journal_or_source or '未知'}    类型：{self._source_type_label(paper.source_type)}    "
-            f"发布日期：{format_date_only(paper.published_date)}    DOI：{paper.doi or '未知'}\n"
-            f"命中关键词：{paper.matched_keywords_text or '无'}    命中位置：{paper.matched_fields_text or '无'}"
+            f"\u5206\u6570 {int(paper.relevance_score)} \u00b7 {paper.journal_or_source or '\u672a\u77e5\u6765\u6e90'} \u00b7 {self._source_type_label(paper.source_type)} \u00b7 "
+            f"\u53d1\u5e03\u65e5\u671f {format_date_only(paper.published_date)} \u00b7 {doi_state}\n"
+            f"\u4f5c\u8005\uff1a{paper.authors or '\u672a\u77e5'}\n"
+            f"\u547d\u4e2d\u5173\u952e\u8bcd\uff1a{paper.matched_keywords_text or '\u65e0'}"
         )
         body = (
-            f"摘要\n{paper.abstract or '该数据源未提供完整摘要。'}\n\n"
-            f"相关性说明\n{paper.reason_zh or '暂无'}\n\n"
-            f"评分拆解\n{self._score_breakdown_text(paper)}\n\n"
-            f"链接\n{paper.url or '无'}"
+            f"\u6458\u8981\n{paper.abstract or '\u8be5\u6570\u636e\u6e90\u672a\u63d0\u4f9b\u5b8c\u6574\u6458\u8981\u3002'}\n\n"
+            f"\u4e3a\u4ec0\u4e48\u503c\u5f97\u5173\u6ce8\n{paper.reason_zh or '\u6682\u65e0\u76f8\u5173\u6027\u8bf4\u660e\u3002'}\n\n"
+            f"\u8bc4\u5206\u4f9d\u636e\n{self._score_breakdown_text(paper)}\n\n"
+            f"\u5916\u90e8\u94fe\u63a5\u72b6\u6001\n{'\u53ef\u6253\u5f00' if paper.url else '\u8be5\u6761\u76ee\u6682\u7f3a\u5916\u90e8\u94fe\u63a5'}"
         )
         text.configure(state="normal")
         text.delete("1.0", "end")
@@ -1470,13 +1586,29 @@ class MainWindow(tk.Tk):
         box.insert("1.0", text)
         box.configure(state="disabled")
 
+    def _paper_for_tree_row(self, tree: ttk.Treeview, row_id: str) -> Paper | None:
+        if not row_id or row_id == "empty":
+            return None
+        try:
+            index = int(row_id)
+        except ValueError:
+            return None
+        if tree is getattr(self, "daily_tree", None):
+            papers = self.daily_papers
+        elif tree is getattr(self, "survey_tree", None):
+            papers = self.survey_papers
+        else:
+            papers = []
+        return papers[index] if 0 <= index < len(papers) else None
+
     def _open_selected_tree_link(self, tree: ttk.Treeview) -> None:
         selection = tree.selection()
         if not selection:
+            messagebox.showinfo("\u672a\u9009\u62e9\u8bba\u6587", "\u8bf7\u5148\u5728\u5217\u8868\u4e2d\u9009\u62e9\u4e00\u7bc7\u8bba\u6587\u3002", parent=self)
             return
-        values = tree.item(selection[0], "values")
-        if values and len(values) >= len(RESULT_COLUMNS):
-            self._open_url_safely(str(values[RESULT_COLUMNS.index("link")]))
+        paper = self._paper_for_tree_row(tree, selection[0])
+        if paper:
+            self._open_url_safely(paper.url)
 
     def _open_tree_link_on_click(self, event: tk.Event, tree: ttk.Treeview) -> None:
         region = tree.identify_region(event.x, event.y)
@@ -1484,16 +1616,19 @@ class MainWindow(tk.Tk):
             return
         row_id = tree.identify_row(event.y)
         column_id = tree.identify_column(event.x)
-        if not row_id or column_id != f"#{RESULT_COLUMNS.index('link') + 1}":
+        if not row_id or column_id != f"#{RESULT_COLUMNS.index('action') + 1}":
             return
         tree.selection_set(row_id)
-        values = tree.item(row_id, "values")
-        if values and len(values) >= len(RESULT_COLUMNS):
-            self._open_url_safely(str(values[RESULT_COLUMNS.index('link')]))
+        paper = self._paper_for_tree_row(tree, row_id)
+        if paper:
+            self.selected_paper = paper
+            self._open_url_safely(paper.url)
 
     def open_selected_link(self) -> None:
-        if self.selected_paper and self.selected_paper.url:
-            self._open_url_safely(self.selected_paper.url)
+        if not self.selected_paper:
+            messagebox.showinfo("\u672a\u9009\u62e9\u8bba\u6587", "\u8bf7\u5148\u5728\u5217\u8868\u4e2d\u9009\u62e9\u4e00\u7bc7\u8bba\u6587\u3002", parent=self)
+            return
+        self._open_url_safely(self.selected_paper.url)
 
     def _open_url_safely(self, url: str) -> None:
         parsed = urlparse(str(url))
@@ -1749,9 +1884,26 @@ class MainWindow(tk.Tk):
         profile = self._editor_profile()
         selection = self.keyword_tree.selection() if hasattr(self, "keyword_tree") else ()
         if not profile or not selection:
-            self.keyword_editor_status_var.set("请先在表格中选择要删除的已有关键词。")
+            self.keyword_editor_status_var.set("\u8bf7\u5148\u5728\u8868\u683c\u4e2d\u9009\u62e9\u8981\u5220\u9664\u7684\u5df2\u6709\u5173\u952e\u8bcd\u3002")
             return
         kind, group_name, index = self.keyword_rows[int(selection[0])]
+        preview = ""
+        if kind == "exclude":
+            excludes = profile.get("exclude_terms") or []
+            if 0 <= index < len(excludes):
+                preview = str(excludes[index])
+        else:
+            groups = profile.get("keyword_groups") or {}
+            group = groups.get(group_name)
+            terms = group.get("terms", []) if isinstance(group, dict) else []
+            if 0 <= index < len(terms):
+                preview = str(terms[index])
+        if not messagebox.askyesno(
+            "\u786e\u8ba4\u5220\u9664\u5173\u952e\u8bcd",
+            f"\u786e\u5b9a\u5220\u9664\u5173\u952e\u8bcd\uff1a{preview or '\u672a\u77e5'}\uff1f\n\n\u5220\u9664\u540e\u9700\u70b9\u51fb\u201c\u4fdd\u5b58\u5168\u90e8\u5173\u952e\u8bcd\u201d\u624d\u4f1a\u5199\u5165 Profile\u3002",
+            parent=self,
+        ):
+            return
         deleted = ""
         if kind == "exclude":
             excludes = profile.get("exclude_terms") or []
@@ -1766,7 +1918,7 @@ class MainWindow(tk.Tk):
         self._cleanup_empty_keyword_groups(profile)
         self.keyword_term_var.set("")
         self._reload_keyword_editor()
-        self.keyword_editor_status_var.set(f"已删除关键词：{deleted}" if deleted else "未删除任何关键词。")
+        self.keyword_editor_status_var.set(f"\u5df2\u5220\u9664\u5173\u952e\u8bcd\uff1a{deleted}\uff1b\u8bf7\u4fdd\u5b58\u5168\u90e8\u5173\u952e\u8bcd\u4ee5\u751f\u6548\u3002" if deleted else "\u672a\u5220\u9664\u4efb\u4f55\u5173\u952e\u8bcd\u3002")
 
     def _cleanup_empty_keyword_groups(self, profile: dict[str, Any]) -> None:
         groups = profile.get("keyword_groups") or {}
@@ -1859,7 +2011,11 @@ class MainWindow(tk.Tk):
         self.profile_yaml_text.insert("1.0", text)
 
     def validate_profile_input(self) -> None:
-        result = validate_profile_yaml(self.profile_yaml_text.get("1.0", "end"), self.profile_direction_var.get())
+        source_text = self.profile_yaml_text.get("1.0", "end").strip()
+        if not source_text:
+            self.profile_validation_var.set("\u8bf7\u5148\u7c98\u8d34 AI \u751f\u6210\u6216\u624b\u52a8\u7f16\u5199\u7684 Profile \u914d\u7f6e\u3002")
+            return
+        result = validate_profile_yaml(source_text, self.profile_direction_var.get())
         self.validated_profile = result.profile if result.ok else None
         self.normalized_profile_yaml = result.normalized_yaml if result.ok else ""
         if result.ok and result.profile:
@@ -1867,31 +2023,50 @@ class MainWindow(tk.Tk):
             queries = result.profile.get("search_queries") or []
             excludes = result.profile.get("exclude_terms") or []
             journals = result.profile.get("recommended_journals") or []
-            warning_text = "\n".join(result.warnings) if result.warnings else "无"
+            existing_ids = {str(profile.get("profile_id")) for profile in load_all_profiles()}
+            will_cover = str(result.profile.get("profile_id")) in existing_ids
+            warning_text = "\n".join(result.warnings) if result.warnings else "\u65e0"
             self.profile_validation_var.set(
-                f"解析成功；模式：{result.parse_mode or '标准 Profile YAML'}；Profile ID：{result.profile.get('profile_id')}；"
-                f"显示名称：{result.profile.get('display_name')}\n"
-                f"search_queries：{len(queries)}；keyword_groups：{len(groups)}；exclude_terms：{len(excludes)}；recommended_journals：{len(journals)}\n"
-                f"潜在问题：{warning_text}"
+                f"\u89e3\u6790\u6210\u529f\uff0c\u5df2\u751f\u6210\u53ef\u9884\u89c8\u7684 Profile\u3002\n"
+                f"Profile ID\uff1a{result.profile.get('profile_id')}\uff1b\u663e\u793a\u540d\u79f0\uff1a{result.profile.get('display_name')}\n"
+                f"\u68c0\u7d22\u5f0f\uff1a{len(queries)}\uff1b\u5173\u952e\u8bcd\u7ec4\uff1a{len(groups)}\uff1b\u6392\u9664\u8bcd\uff1a{len(excludes)}\uff1b\u671f\u520a\uff1a{len(journals)}\n"
+                f"\u662f\u5426\u8986\u76d6\u73b0\u6709 Profile\uff1a{'\u662f' if will_cover else '\u5426'}\n"
+                f"\u6f5c\u5728\u95ee\u9898\uff1a{warning_text}"
             )
         else:
             details = "\n".join(result.errors)
             if result.raw_error:
-                details += f"\n\n原始解析错误：{result.raw_error}"
-            self.profile_validation_var.set("解析失败：\n" + details)
+                details += f"\n\n\u539f\u59cb\u89e3\u6790\u9519\u8bef\uff1a{result.raw_error}"
+            self.profile_validation_var.set("\u89e3\u6790\u5931\u8d25\uff1a\n" + details)
 
     def save_validated_profile(self, make_active: bool) -> None:
         if not self.validated_profile:
             self.validate_profile_input()
         if not self.validated_profile:
             return
+        profile_id = str(self.validated_profile.get("profile_id", ""))
+        existing_ids = {str(profile.get("profile_id")) for profile in load_all_profiles()}
+        if profile_id in existing_ids:
+            if not messagebox.askyesno(
+                "\u786e\u8ba4\u8986\u76d6 Profile",
+                f"Profile {profile_id} \u5df2\u5b58\u5728\u3002\n\n\u4fdd\u5b58\u540e\u4f1a\u8986\u76d6\u73b0\u6709\u914d\u7f6e\uff1b\u5982\u8bbe\u4e3a\u5f53\u524d\u65b9\u5411\uff0c\u5c06\u5f71\u54cd\u4eca\u65e5\u53d1\u73b0\u548c\u5386\u53f2\u8c03\u7814\u7684\u7b5b\u9009\u7ed3\u679c\u3002\n\n\u662f\u5426\u7ee7\u7eed\uff1f",
+                parent=self,
+            ):
+                return
+        elif make_active:
+            if not messagebox.askyesno(
+                "\u786e\u8ba4\u8bbe\u4e3a\u5f53\u524d\u65b9\u5411",
+                "\u4fdd\u5b58\u5e76\u8bbe\u4e3a\u5f53\u524d\u65b9\u5411\u540e\uff0c\u4eca\u65e5\u53d1\u73b0\u548c\u5386\u53f2\u8c03\u7814\u5c06\u4f7f\u7528\u65b0 Profile \u8fdb\u884c\u7b5b\u9009\u3002\u662f\u5426\u7ee7\u7eed\uff1f",
+                parent=self,
+            ):
+                return
         path = save_profile(self.validated_profile)
         if make_active:
-            set_active_profile(str(self.validated_profile.get("profile_id")))
+            set_active_profile(profile_id)
             self.settings = load_settings()
             self.keyword_filter = KeywordFilter(load_keywords())
         self.refresh_profile_page()
-        messagebox.showinfo("已保存", f"Profile 已保存到：\n{path}", parent=self)
+        messagebox.showinfo("\u5df2\u4fdd\u5b58", f"Profile \u5df2\u4fdd\u5b58\u5230\uff1a\n{path}", parent=self)
 
     def show_first_run_wizard(self) -> None:
         use_default = messagebox.askyesno(
@@ -1918,10 +2093,16 @@ class MainWindow(tk.Tk):
         return False
 
     def generate_daily_report(self) -> None:
+        if not self.daily_papers:
+            messagebox.showinfo("暂无可生成的报告", "当前没有可导出的每日结果。请先运行检索，或放宽筛选条件后再试。", parent=self)
+            return
         path = generate_daily_report(self.daily_papers)
         messagebox.showinfo("报告已生成", f"报告已保存到：\n{path}", parent=self)
 
     def generate_survey_report(self) -> None:
+        if not self.survey_papers:
+            messagebox.showinfo("暂无可生成的报告", "当前没有可导出的历史调研结果。请先运行调研，或放宽筛选条件后再试。", parent=self)
+            return
         from_date, until_date = self._survey_dates()
         path = generate_survey_report(self.survey_papers, self.survey_name_var.get() or "当前方向历史调研", from_date, until_date)
         messagebox.showinfo("报告已生成", f"报告已保存到：\n{path}", parent=self)
@@ -1937,14 +2118,15 @@ class MainWindow(tk.Tk):
         self.colors = self._palette("dark")
         self._configure_styles()
         self.configure(bg=self.colors["bg"])
-        self.logo_canvas.configure(bg=self.colors["surface"])
-        self._draw_logo(self.logo_canvas)
+        if hasattr(self, "logo_canvas"):
+            self.logo_canvas.configure(bg=self.colors["sidebar"])
+            self._draw_logo(self.logo_canvas)
         for button in getattr(self, "choice_buttons", []):
             self._style_plain_button(button)
         for button, var, label in getattr(self, "check_buttons", []):
             self._style_check_pill(button, var, label)
         for canvas in getattr(self, "scroll_canvases", []):
-            canvas.configure(bg=self.colors["bg"])
+            canvas.configure(bg=self.colors["workspace"])
         self._select_tab(getattr(self, "current_tab", "daily"))
         for text_widget in (
             getattr(self, "daily_detail_text", None),

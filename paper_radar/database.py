@@ -212,6 +212,47 @@ class PaperDatabase:
             ).fetchall()
         return [self._row_to_paper(row) for row in rows]
 
+    def load_papers_for_period(self, from_date: str, until_date: str, source_types: tuple[str, ...]) -> list[Paper]:
+        if not source_types:
+            return []
+        placeholders = ",".join("?" for _ in source_types)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT * FROM papers
+                WHERE substr(published_date, 1, 10) >= ?
+                  AND substr(published_date, 1, 10) <= ?
+                  AND source_type IN ({placeholders})
+                ORDER BY relevance_score DESC, published_date DESC
+                """,
+                (from_date, until_date, *source_types),
+            ).fetchall()
+        return [self._row_to_paper(row) for row in rows]
+
+    def is_query_cached_today(
+        self,
+        source_type: str,
+        journal_name: str,
+        query: str,
+        from_date: str,
+        until_date: str,
+    ) -> bool:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT last_run_at, status FROM search_query_cache
+                WHERE source_type=? AND journal_name=? AND query=? AND from_date=? AND until_date=?
+                """,
+                (source_type, journal_name, query, from_date, until_date),
+            ).fetchone()
+        if not row or row["status"] != "ok":
+            return False
+        try:
+            last_run = datetime.fromisoformat(row["last_run_at"])
+            return last_run.date() == datetime.now().date()
+        except Exception:
+            return False
+
     def is_query_cached(
         self,
         source_type: str,

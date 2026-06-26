@@ -10,30 +10,40 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { EmptyState } from "../components/ui/empty-state";
 import { Toast } from "../components/ui/toast";
-import { PaperRadarApiError, getProfiles, getRuntimeMode, userMessageForError } from "../services/api";
+import { PaperRadarApiError, getProfiles, getRuntimeMode, userFacingError } from "../services/api";
 
-type LoadState = "loading" | "ready" | "empty" | "backend_offline" | "error";
-type ToastState = { message: string; type: "success" | "error" | "warning" | "info" } | null;
+type LoadState = "loading" | "ready" | "empty" | "service_unavailable" | "error";
+type ToastState = { title?: string; description?: string; message?: string; type: "success" | "error" | "warning" | "info" } | null;
 
 export function ResearchProfiles() {
   const [profiles, setProfiles] = useState<ResearchProfile[]>([]);
   const [state, setState] = useState<LoadState>("loading");
   const [toast, setToast] = useState<ToastState>(null);
-  const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  const [lastErrorDetail, setLastErrorDetail] = useState<string | null>(null);
   const mockMode = getRuntimeMode() === "mock";
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 4200);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  const actionToast = (message: string) => setToast({ title: "操作入口已保留", description: message, type: "info" });
+  const showLogs = () => setToast({ title: "日志已记录", description: lastErrorDetail ? "详细错误已保留在本地日志中。" : "当前没有新的错误日志。", type: "info" });
 
   const loadProfiles = async () => {
     setState("loading");
-    setErrorDetail(null);
+    setLastErrorDetail(null);
     try {
       const result = await getProfiles();
       setProfiles(result);
       setState(result.length ? "ready" : "empty");
     } catch (error) {
-      if (error instanceof PaperRadarApiError && error.kind === "backend_offline") setState("backend_offline");
+      const info = userFacingError(error);
+      if (error instanceof PaperRadarApiError && error.kind === "local_service_unavailable") setState("service_unavailable");
       else setState("error");
-      setErrorDetail(error instanceof PaperRadarApiError ? error.detail ?? null : String(error));
-      setToast({ message: userMessageForError(error), type: "error" });
+      setLastErrorDetail(info.detail);
+      setToast({ title: info.title, description: info.message, type: "error" });
     }
   };
 
@@ -42,7 +52,6 @@ export function ResearchProfiles() {
   }, []);
 
   const currentProfile = profiles.find((profile) => profile.isCurrent) ?? profiles[0];
-  const actionToast = (message: string) => setToast({ message, type: "info" });
   const deleteProfile = (profile: ResearchProfile) => {
     if (window.confirm(`确认删除研究方向“${profile.name}”？此操作只作用于这一行。`)) {
       actionToast(`已确认删除“${profile.name}”的操作入口，保存能力将在后续接入。`);
@@ -55,8 +64,8 @@ export function ResearchProfiles() {
       {mockMode && <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">当前为演示数据模式，列表内容来自内置示例。</div>}
 
       {state === "loading" && <EmptyState title="正在加载研究方向" description="PaperRadar 正在读取本地研究方向配置。" />}
-      {state === "backend_offline" && <EmptyState title="无法加载研究方向配置" description="本地后端未连接，无法读取你的研究方向。请确认后端服务正在运行。" actionLabel="重试连接" onAction={loadProfiles} secondaryActionLabel="查看日志" onSecondaryAction={() => actionToast("日志入口将在后续接入。")} />}
-      {state === "error" && <EmptyState title="研究方向加载失败" description="读取研究方向时出现错误，请重试或查看错误详情。" actionLabel="重试" onAction={loadProfiles} />}
+      {state === "service_unavailable" && <EmptyState title="无法加载研究方向配置" description="文献检索服务暂不可用，PaperRadar 无法读取你的研究方向。请点击重新连接，或查看日志。" actionLabel="重新连接" onAction={loadProfiles} secondaryActionLabel="查看日志" onSecondaryAction={showLogs} />}
+      {state === "error" && <EmptyState title="研究方向加载失败" description="读取研究方向时出现错误，请重试或查看日志了解原因。" actionLabel="重试" onAction={loadProfiles} secondaryActionLabel="查看日志" onSecondaryAction={showLogs} />}
       {state === "empty" && <EmptyState title="还没有研究方向配置" description="创建一个研究方向配置后，PaperRadar 才能按你的兴趣筛选论文。" actionLabel="AI 辅助生成" onAction={() => actionToast("AI 辅助生成入口将在导入功能中继续完善。")} />}
 
       {state === "ready" && currentProfile && (
@@ -66,14 +75,26 @@ export function ResearchProfiles() {
           <KeywordWorkspace profile={currentProfile} keywords={currentProfile.keywords} />
 
           <div className="grid grid-cols-2 gap-5">
-            <Card><CardHeader><div className="flex items-center gap-2"><BrainCircuit className="h-5 w-5 text-blue-600" /><CardTitle>AI 辅助生成研究方向</CardTitle></div></CardHeader><CardContent className="space-y-4"><p className="text-sm leading-6 text-slate-500">输入研究方向，PaperRadar 会生成可编辑的关键词与检索式草案。生成后请人工检查再保存。</p><Input placeholder="例如：片上光计算、光神经网络、矩阵乘法加速" /><div className="flex justify-end gap-2"><Button variant="secondary">生成 AI 提示词</Button><Button variant="primary">解析并预览</Button></div></CardContent></Card>
-            <Card><CardHeader><div className="flex items-center gap-2"><ClipboardPaste className="h-5 w-5 text-blue-600" /><CardTitle>研究方向批量导入</CardTitle></div></CardHeader><CardContent className="space-y-4"><textarea className="h-[132px] w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10" placeholder="粘贴由 AI 生成或手动编写的研究方向配置，解析后可预览并保存。" /><div className="flex justify-end gap-2"><Button variant="secondary">解析并预览</Button><Button variant="primary">保存并设为当前方向</Button></div></CardContent></Card>
+            <Card>
+              <CardHeader><div className="flex items-center gap-2"><BrainCircuit className="h-5 w-5 text-blue-600" /><CardTitle>AI 辅助生成研究方向</CardTitle></div></CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm leading-6 text-slate-500">输入研究方向，PaperRadar 会生成可编辑的关键词与检索式草案。生成后请人工检查再保存。</p>
+                <Input placeholder="例如：片上光计算、光神经网络、矩阵乘法加速" />
+                <div className="flex justify-end gap-2"><Button variant="secondary">生成 AI 提示词</Button><Button variant="primary">解析并预览</Button></div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><div className="flex items-center gap-2"><ClipboardPaste className="h-5 w-5 text-blue-600" /><CardTitle>研究方向批量导入</CardTitle></div></CardHeader>
+              <CardContent className="space-y-4">
+                <textarea className="h-[132px] w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10" placeholder="粘贴由 AI 生成或手动编写的研究方向配置，解析后可预览并保存。" />
+                <div className="flex justify-end gap-2"><Button variant="secondary">解析并预览</Button><Button variant="primary">保存并设为当前方向</Button></div>
+              </CardContent>
+            </Card>
           </div>
         </div>
       )}
 
-      {errorDetail && <div className="mt-4 rounded-2xl border border-red-100 bg-red-50 p-4 text-xs leading-5 text-red-800">{errorDetail}</div>}
-      {toast && <Toast message={toast.message} type={toast.type} />}
+      {toast && <Toast {...toast} />}
     </>
   );
 }

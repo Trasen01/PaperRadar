@@ -1,4 +1,4 @@
-﻿import { CircleAlert, CircleCheck, CircleDashed } from "lucide-react";
+import { CircleAlert, CircleCheck, CircleDashed } from "lucide-react";
 import type { SourceStatusMap } from "../../types/summary";
 import { Badge } from "../ui/badge";
 
@@ -32,14 +32,14 @@ export function SourceStatusBar({ sources }: SourceStatusBarProps) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       {Object.entries(sources).map(([key, source]) => (
-        <div key={key} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" title={source.error ?? undefined}>
+        <div key={key} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
           {iconFor(source.status)}
           <span className="font-medium text-slate-800">{source.label}</span>
           <Badge variant={variantFor(source.status)}>{labelFor(source.status)}</Badge>
           <span className="text-xs text-slate-500">
             抓取 {source.fetched} · 显示 {source.displayed} · 失败 {source.failed}
           </span>
-          {source.error && <span className="max-w-[220px] truncate text-xs text-amber-700">{source.error}</span>}
+          {source.error && <span className="text-xs text-amber-700">可查看失败详情</span>}
         </div>
       ))}
     </div>

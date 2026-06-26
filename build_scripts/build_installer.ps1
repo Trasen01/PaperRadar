@@ -1,15 +1,10 @@
-param(
-    [string]$Python = "python",
+﻿param(
     [string]$InnoSetupCompiler = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
 )
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
-
-if (-not (Test-Path "dist\PaperRadar\PaperRadar.exe")) {
-    & "$PSScriptRoot\build_qt_exe.ps1" -Python $Python
-}
 
 if (-not (Test-Path $InnoSetupCompiler)) {
     $candidates = @(
@@ -29,8 +24,12 @@ if (-not (Test-Path $InnoSetupCompiler)) {
     throw "Inno Setup compiler not found. Install Inno Setup 6 or pass -InnoSetupCompiler."
 }
 
+if (-not (Test-Path "dist\PaperRadar-v0.3.0\PaperRadar.exe")) {
+    throw "Desktop build output not found. Build the desktop app first, then run this installer script."
+}
+
 New-Item -ItemType Directory -Force -Path "dist\installer" | Out-Null
-& $InnoSetupCompiler "installer\PaperRadar.iss"
+& $InnoSetupCompiler "installer\PaperRadar_Desktop.iss"
 
 if ($LASTEXITCODE -ne 0) {
     throw "Inno Setup failed with exit code $LASTEXITCODE."

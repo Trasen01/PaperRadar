@@ -1,0 +1,39 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "PaperRadar",
+  "version": "0.3.0",
+  "identifier": "com.paperradar.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "PaperRadar",
+        "width": 1440,
+        "height": 920,
+        "minWidth": 1180,
+        "minHeight": 720
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "externalBin": [
+      "binaries/paperradar-backend"
+    ],
+    "icon": [
+      "../../assets/PaperRadar.ico"
+    ]
+  }
+}
+

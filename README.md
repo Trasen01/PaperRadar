@@ -2,7 +2,7 @@
 
 PaperRadar is a lightweight Windows desktop literature radar for researchers. It helps you monitor new papers every day, run historical literature surveys before starting a project, manage research-direction Profiles, score relevance locally, store papers in SQLite, and generate Markdown reports.
 
-The current desktop application is built with Python and PySide6. The main Python package is `paper_radar`, and the product and repository name are **PaperRadar**.
+The current desktop application uses a modern desktop shell with a React/TypeScript interface and a local Python service that reuses the existing `paper_radar` core logic. The product and repository name are **PaperRadar**.
 
 ## What PaperRadar Does
 
@@ -255,3 +255,4 @@ git push -u origin main
 ## License
 
 License will be decided later.
+

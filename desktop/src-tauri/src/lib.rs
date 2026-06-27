@@ -50,9 +50,18 @@ fn stop_backend(app: &tauri::AppHandle) {
 }
 
 fn start_backend(app: &tauri::AppHandle, force_restart: bool) -> Result<(), String> {
-    if service_is_reachable() && !force_restart {
+    if service_is_reachable() {
         write_service_log("local search service already reachable");
         return Ok(());
+    }
+
+    {
+        let state = app.state::<BackendState>();
+        let already_starting = state.0.lock().map(|child| child.is_some()).unwrap_or(false);
+        if already_starting && !force_restart {
+            write_service_log("managed local search service is already starting");
+            return Ok(());
+        }
     }
 
     if force_restart {

@@ -9,7 +9,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from paper_radar.database import PaperDatabase
 from paper_radar.keyword_filter import KeywordFilter
-from paper_radar.main_window import score_and_tag
+from paper_radar.services import score_and_tag
 from paper_radar.settings import load_keywords
 
 

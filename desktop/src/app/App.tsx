@@ -21,9 +21,9 @@ export function App() {
 
   return (
     <AppShell activePage={page} navigation={navigation} onNavigate={setPage}>
-      {page === "today" && <TodayDiscovery />}
-      {page === "history" && <HistoryResearch />}
-      {page === "profiles" && <ResearchProfiles />}
+      <div className={page === "today" ? "block" : "hidden"}><TodayDiscovery /></div>
+      <div className={page === "history" ? "block" : "hidden"}><HistoryResearch /></div>
+      <div className={page === "profiles" ? "block" : "hidden"}><ResearchProfiles /></div>
     </AppShell>
   );
 }

@@ -132,6 +132,38 @@ def _mark_source_error(status: dict[str, Any], exc: Exception) -> None:
         status["status"] = "failed"
 
 
+def _append_source_warning(status: dict[str, Any], message: str) -> None:
+    message = " ".join(str(message or "").split())
+    if not message:
+        return
+    existing = str(status.get("reason") or "").strip()
+    if existing:
+        status["reason"] = f"{existing}; {message}"[:240]
+    else:
+        status["reason"] = message[:240]
+
+
+def _rss_failure_summary(rss_stats: Any) -> str:
+    failures = []
+    for source in getattr(rss_stats, "source_stats", []) or []:
+        if str(getattr(source, "status", "")) != "failed":
+            continue
+        name = str(getattr(source, "name", "") or "RSS")
+        error = str(getattr(source, "error", "") or "").splitlines()[0]
+        failures.append(f"{name}: {error}" if error else name)
+    if not failures:
+        return ""
+    suffix = "" if len(failures) <= 2 else f" 等 {len(failures)} 个 RSS 源失败"
+    return "; ".join(failures[:2]) + suffix
+
+
+def _crossref_failure_summary(failures: list[str]) -> str:
+    if not failures:
+        return ""
+    suffix = "" if len(failures) <= 2 else f" 等 {len(failures)} 个 Crossref 请求失败"
+    return "; ".join(" ".join(item.split()) for item in failures[:2]) + suffix
+
+
 def _finalize_source_status(status: dict[str, Any]) -> None:
     if not status.get("enabled"):
         status["status"] = "disabled"
@@ -203,6 +235,7 @@ class DailySearchService:
                 stats["failed"] += int(rss.stats.failed_sources)
                 source_status["top"]["raw"] += len(batch)
                 source_status["top"]["failed"] += max(0, int(stats.get("failed", 0)) - failed_before)
+                _append_source_warning(source_status["top"], _rss_failure_summary(rss.stats))
                 stats["rss"] = len(batch)
                 stats["success"] += 1
             except Exception as exc:
@@ -220,6 +253,7 @@ class DailySearchService:
                 stats["failed"] += len(result.failed_requests)
                 source_status["top"]["raw"] += len(batch)
                 source_status["top"]["failed"] += max(0, int(stats.get("failed", 0)) - failed_before)
+                _append_source_warning(source_status["top"], _crossref_failure_summary(result.failed_requests))
                 stats["crossref"] = len(batch)
                 stats["success"] += 1
             except Exception as exc:
@@ -339,6 +373,8 @@ class HistoricalSurveyService:
                 stats["success"] += 1
                 stats["failed"] += int(rss.stats.failed_sources)
                 stats["failed_query_count"] += int(rss.stats.failed_sources)
+                source_status["top"]["failed"] += int(rss.stats.failed_sources)
+                _append_source_warning(source_status["top"], _rss_failure_summary(rss.stats))
             except Exception as exc:
                 batch = []
                 stats["failed"] += 1
@@ -351,7 +387,7 @@ class HistoricalSurveyService:
             self._handle_batch(batch, all_seen, stats, completed, total_steps, "\u9876\u7ea7\u671f\u520a", "\u6700\u65b0\u6587\u7ae0", progress)
 
         if self.sources.get("crossref") and not should_stop():
-            completed = self._run_crossref(top_journals, queries, all_seen, stats, completed, total_steps, rows_per_query, timeout, max_retries, retry_delay, max_workers, delay, cache_enabled, should_stop, progress)
+            completed = self._run_crossref(top_journals, queries, all_seen, stats, source_status["top"], completed, total_steps, rows_per_query, timeout, max_retries, retry_delay, max_workers, delay, cache_enabled, should_stop, progress)
 
         scored = score_and_tag(dedupe_papers(all_seen), self.keyword_filter, keep_unmatched=False)
         storage = self.db.upsert_papers_with_stats(scored)
@@ -376,7 +412,7 @@ class HistoricalSurveyService:
         stats["status"] = "stopped" if should_stop() else ("partial_completed" if stats["failed"] else "completed")
         return RunResult(scored, dict(stats))
 
-    def _run_crossref(self, top_journals: list[dict[str, Any]], queries: list[str], all_seen: list[Paper], stats: Counter, completed: int, total_steps: int, rows_per_query: int, timeout: int, max_retries: int, retry_delay: int, max_workers: int, delay: float, cache_enabled: bool, should_stop: Callable[[], bool], progress: ProgressCallback) -> int:
+    def _run_crossref(self, top_journals: list[dict[str, Any]], queries: list[str], all_seen: list[Paper], stats: Counter, source_status: dict[str, Any], completed: int, total_steps: int, rows_per_query: int, timeout: int, max_retries: int, retry_delay: int, max_workers: int, delay: float, cache_enabled: bool, should_stop: Callable[[], bool], progress: ProgressCallback) -> int:
         tasks: list[tuple[dict[str, Any], str, list[str]]] = []
         for journal in top_journals:
             issns = journal.get("issn") or []
@@ -425,10 +461,14 @@ class HistoricalSurveyService:
                         stats["success"] += 1
                         stats["failed"] += len(result.failed_requests)
                         stats["failed_query_count"] += len(result.failed_requests)
+                        source_status["failed"] += len(result.failed_requests)
+                        _append_source_warning(source_status, _crossref_failure_summary(result.failed_requests))
                     except Exception as exc:
                         status = str(exc)
                         stats["failed"] += 1
                         stats["failed_query_count"] += 1
+                        source_status["failed"] += 1
+                        _append_source_warning(source_status, status)
                         if "timeout" in str(exc).lower():
                             stats["timeouts"] += 1
                         logger.warning("Survey Crossref failed: %s", exc)

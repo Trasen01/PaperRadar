@@ -7,7 +7,7 @@ type PaperDetailSheetProps = {
   paper: Paper | null;
   open: boolean;
   onClose: () => void;
-  onOpenLink: (paper: Paper) => void;
+  onOpenLink: (paper: Paper) => void | Promise<void>;
 };
 
 export function PaperDetailSheet({ paper, open, onClose, onOpenLink }: PaperDetailSheetProps) {
@@ -55,7 +55,7 @@ export function PaperDetailSheet({ paper, open, onClose, onOpenLink }: PaperDeta
           <Button variant="secondary" disabled={!paper.url}>
             复制链接
           </Button>
-          <Button variant="primary" disabled={!paper.url} onClick={() => onOpenLink(paper)}>
+          <Button variant="primary" disabled={!paper.url} onClick={() => { void onOpenLink(paper); }}>
             打开论文链接
           </Button>
         </div>

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import logging
+import threading
+import uuid
+from copy import deepcopy
+from datetime import datetime
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
@@ -12,13 +16,15 @@ from services.paper_radar_adapter import (
     load_history_payload,
     load_profiles_payload,
     load_today_payload,
+    run_history_survey_with_progress,
     run_history_survey_payload,
+    run_today_check_with_progress,
     run_today_check_payload,
     save_profile_payload,
 )
 
 logger = logging.getLogger(__name__)
-app = FastAPI(title="PaperRadar Local Backend", version="0.3.0")
+app = FastAPI(title="PaperRadar Local Backend", version="0.4.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -60,10 +66,81 @@ class ProfilePayload(BaseModel):
     keywords: list[KeywordPayload] = Field(default_factory=list)
 
 
+_TASK_LOCK = threading.Lock()
+_TASKS: dict[str, dict] = {}
+_ACTIVE_TASK_BY_KIND: dict[str, str] = {}
+
+
+def _new_task(kind: str) -> tuple[str, threading.Event]:
+    task_id = uuid.uuid4().hex
+    stop_event = threading.Event()
+    with _TASK_LOCK:
+        _TASKS[task_id] = {
+            "taskId": task_id,
+            "kind": kind,
+            "state": "running",
+            "payload": {"papers": [], "summary": None},
+            "error": None,
+            "createdAt": datetime.now().isoformat(timespec="seconds"),
+            "updatedAt": datetime.now().isoformat(timespec="seconds"),
+            "_stop": stop_event,
+        }
+        _ACTIVE_TASK_BY_KIND[kind] = task_id
+    return task_id, stop_event
+
+
+def _update_task(task_id: str, **updates: object) -> None:
+    with _TASK_LOCK:
+        task = _TASKS.get(task_id)
+        if not task:
+            return
+        task.update(updates)
+        task["updatedAt"] = datetime.now().isoformat(timespec="seconds")
+
+
+def _public_task(task: dict | None) -> dict:
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {key: deepcopy(value) for key, value in task.items() if not key.startswith("_")}
+
+
+def _get_task(task_id: str) -> dict:
+    with _TASK_LOCK:
+        return _public_task(_TASKS.get(task_id))
+
+
+def _active_task(kind: str) -> dict:
+    with _TASK_LOCK:
+        task_id = _ACTIVE_TASK_BY_KIND.get(kind)
+        return _public_task(_TASKS.get(task_id or ""))
+
+
+def _start_background_task(kind: str, runner) -> dict:
+    with _TASK_LOCK:
+        current_id = _ACTIVE_TASK_BY_KIND.get(kind)
+        current = _TASKS.get(current_id or "")
+        if current and current.get("state") == "running":
+            return _public_task(current)
+
+    task_id, stop_event = _new_task(kind)
+
+    def run() -> None:
+        try:
+            result = runner(stop_event, lambda payload: _update_task(task_id, payload=payload))
+            _update_task(task_id, state="cancelled" if stop_event.is_set() else "success", payload=result)
+        except Exception as exc:
+            logger.exception("Background %s task failed", kind)
+            _update_task(task_id, state="failed", error=str(exc))
+
+    thread = threading.Thread(target=run, name=f"paperradar-{kind}-{task_id[:8]}", daemon=True)
+    thread.start()
+    return _get_task(task_id)
+
+
 @app.get("/api/status")
 def status() -> dict:
     return {
-        "version": "0.3.0",
+        "version": "0.4.0",
         "mode": "python-backend",
         "message": "PaperRadar Python backend is available.",
     }
@@ -92,9 +169,31 @@ def check_today(request: CheckRequest) -> dict:
         raise HTTPException(status_code=500, detail=f"今日发现检索失败：{exc}") from exc
 
 
+@app.post("/api/papers/check/task")
+def check_today_task(request: CheckRequest) -> dict:
+    return _start_background_task(
+        "today",
+        lambda stop_event, progress: run_today_check_with_progress(
+            days_back=request.daysBack,
+            min_score=request.minScore,
+            arxiv=request.arxiv,
+            journals=request.journals,
+            should_stop=stop_event.is_set,
+            progress=progress,
+        ),
+    )
+
+
 @app.post("/api/papers/stop")
 def stop_today() -> dict:
-    return {"accepted": True, "message": "停止今日发现任务入口已预留。"}
+    with _TASK_LOCK:
+        task = _TASKS.get(_ACTIVE_TASK_BY_KIND.get("today", ""))
+        if task and task.get("state") == "running":
+            task["_stop"].set()
+            task["state"] = "cancelled"
+            task["updatedAt"] = datetime.now().isoformat(timespec="seconds")
+            return {"accepted": True}
+    return {"accepted": False}
 
 
 @app.get("/api/papers/history")
@@ -121,9 +220,44 @@ def start_history(request: SurveyRequest) -> dict:
         raise HTTPException(status_code=500, detail=f"历史调研失败：{exc}") from exc
 
 
+@app.post("/api/history/start/task")
+def start_history_task(request: SurveyRequest) -> dict:
+    return _start_background_task(
+        "history",
+        lambda stop_event, progress: run_history_survey_with_progress(
+            days=request.days,
+            min_score=request.minScore,
+            arxiv=request.arxiv,
+            journals=request.journals,
+            task_name=request.taskName,
+            should_stop=stop_event.is_set,
+            progress=progress,
+        ),
+    )
+
+
 @app.post("/api/history/stop")
 def stop_history() -> dict:
-    return {"accepted": True, "message": "停止历史调研任务入口已预留。"}
+    with _TASK_LOCK:
+        task = _TASKS.get(_ACTIVE_TASK_BY_KIND.get("history", ""))
+        if task and task.get("state") == "running":
+            task["_stop"].set()
+            task["state"] = "cancelled"
+            task["updatedAt"] = datetime.now().isoformat(timespec="seconds")
+            return {"accepted": True}
+    return {"accepted": False}
+
+
+@app.get("/api/tasks/active/{kind}")
+def active_task_status(kind: str) -> dict:
+    if kind not in {"today", "history"}:
+        raise HTTPException(status_code=404, detail="Task kind not found")
+    return _active_task(kind)
+
+
+@app.get("/api/tasks/{task_id}")
+def task_status(task_id: str) -> dict:
+    return _get_task(task_id)
 
 
 @app.get("/api/profiles")

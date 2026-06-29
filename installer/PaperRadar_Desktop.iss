@@ -1,5 +1,5 @@
 ﻿#define MyAppName "PaperRadar"
-#define MyAppVersion "0.3.0"
+#define MyAppVersion "0.4.0"
 #define MyAppPublisher "PaperRadar"
 #define MyAppExeName "PaperRadar.exe"
 #define MyAppId "{{1F0CB35D-5B7B-45D1-9B31-202603000001}}"
@@ -32,8 +32,8 @@ Name: "chinesesimplified"; MessagesFile: "ChineseSimplified.isl"
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加快捷方式："; Flags: unchecked
 
 [Files]
-Source: "..\dist\PaperRadar-v0.3.0\PaperRadar.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\dist\PaperRadar-v0.3.0\paperradar-backend.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\PaperRadar-v0.4.0\PaperRadar.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\PaperRadar-v0.4.0\paperradar-backend.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\PaperRadar"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"

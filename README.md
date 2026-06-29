@@ -34,7 +34,7 @@ docs/images/
 Download and run the Windows installer:
 
 ```text
-PaperRadar_Setup_v0.3.0.exe
+PaperRadar_Setup_v0.4.0.exe
 ```
 
 The installer supports:
@@ -54,7 +54,9 @@ git clone <repo-url> PaperRadar
 cd PaperRadar
 python -m venv .venv
 .\.venv\Scripts\pip install -r requirements.txt
-.\.venv\Scripts\python run.py
+cd desktop
+npm install
+npm run desktop:dev
 ```
 
 ## User Data
@@ -150,39 +152,22 @@ PaperRadar currently supports:
 
 ## Building the Windows App
 
-### Build the EXE
+### Build the Desktop App
 
 ```powershell
-.\build_scripts\build_exe.ps1 -Python .\.venv\Scripts\python.exe
+cd desktop
+npm run desktop:build
 ```
 
 Output:
 
 ```text
-dist\PaperRadar\PaperRadar.exe
+desktop\src-tauri\target\release\paperradar.exe
+desktop\src-tauri\target\release\paperradar-backend.exe
+desktop\src-tauri\target\release\bundle\nsis\PaperRadar_0.4.0_x64-setup.exe
 ```
 
-The build script closes any running PaperRadar process before packaging, preventing file-lock issues during rebuilds.
-
-### Build the Installer
-
-Install Inno Setup 6, then run:
-
-```powershell
-.\build_scripts\build_installer.ps1 -Python .\.venv\Scripts\python.exe
-```
-
-Output:
-
-```text
-dist\installer\PaperRadar_Setup_v0.3.0.exe
-```
-
-The installer is generated from:
-
-```text
-installer\PaperRadar.iss
-```
+The current packaging flow is Tauri + React + a bundled Python sidecar. The old Tk/PySide/PyInstaller desktop frontend has been removed from the codebase.
 
 ## Project Structure
 
@@ -191,8 +176,10 @@ PaperRadar/
   README.md
   LICENSE
   requirements.txt
-  run.py
   paper_radar/
+    # shared search, scoring, database, and report backend logic
+  desktop/
+    # Tauri shell, React frontend, and Python sidecar entrypoint
   resources/
     default_profiles/
   config_templates/

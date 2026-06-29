@@ -12,7 +12,7 @@ import { SourceStatusBar } from "../components/status/SourceStatusBar";
 import { PaperTable } from "../components/papers/PaperTable";
 import { PaperDetailSheet } from "../components/papers/PaperDetailSheet";
 import { Toast } from "../components/ui/toast";
-import { PaperRadarApiError, checkTodayPapers, getRuntimeMode, waitForLocalService, userFacingError } from "../services/api";
+import { PaperRadarApiError, getActiveSearchTask, getRuntimeMode, getSearchTask, startTodayCheckTask, stopTodayCheck, waitForLocalService, userFacingError } from "../services/api";
 import { openPaperLink } from "../services/papers";
 
 type RunState = "idle" | "checking" | "success" | "empty" | "partial_success" | "service_unavailable" | "source_failed" | "request_failed" | "internal_error" | "cancelled";
@@ -98,6 +98,7 @@ export function TodayDiscovery() {
   const [minScore, setMinScore] = useState(70);
   const [state, setState] = useState<RunState>("idle");
   const [lastErrorDetail, setLastErrorDetail] = useState<string | null>(null);
+  const [taskId, setTaskId] = useState<string | null>(null);
 
   const mockMode = getRuntimeMode() === "mock";
   const running = state === "checking";
@@ -134,6 +135,64 @@ export function TodayDiscovery() {
     if (!mockMode) void checkService();
   }, []);
 
+  const applyTaskSnapshot = (task: Awaited<ReturnType<typeof getSearchTask>>) => {
+    if (task.state === "running" || task.state === "success") {
+      setPapers(task.payload.papers);
+      setSummary(task.payload.summary);
+    }
+  };
+
+  useEffect(() => {
+    if (mockMode) return;
+    getActiveSearchTask("today").then((task) => {
+      if (!task) return;
+      setTaskId(task.taskId);
+      applyTaskSnapshot(task);
+      if (task.state === "running") setState("checking");
+      if (task.state === "success") setState(task.payload.papers.length === 0 ? "empty" : hasSourceProblem(task.payload.summary) ? "partial_success" : "success");
+      if (task.state === "cancelled") setState("cancelled");
+      if (task.state === "failed") setState("request_failed");
+    }).catch(() => undefined);
+  }, [mockMode]);
+
+  useEffect(() => {
+    if (!taskId || state !== "checking") return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const task = await getSearchTask(taskId);
+        if (cancelled) return;
+        applyTaskSnapshot(task);
+        if (task.state === "running") return;
+        if (task.state === "success") {
+          const nextState: RunState = task.payload.papers.length === 0 ? "empty" : hasSourceProblem(task.payload.summary) ? "partial_success" : "success";
+          setState(nextState);
+          setToast({
+            title: nextState === "empty" ? "检索完成" : nextState === "partial_success" ? "检索部分完成" : "检索完成",
+            description: nextState === "empty" ? "没有找到匹配论文，可以调整筛选条件后重试。" : `当前显示 ${task.payload.papers.length} 篇，候选 ${task.payload.summary?.candidateCount ?? task.payload.papers.length} 篇。`,
+            type: nextState === "partial_success" ? "warning" : "success"
+          });
+        } else if (task.state === "cancelled") {
+          setState("cancelled");
+        } else {
+          setState("request_failed");
+          setLastErrorDetail(task.error);
+        }
+      } catch (error) {
+        if (cancelled) return;
+        const info = userFacingError(error);
+        setState(stateFromError(error));
+        setLastErrorDetail(info.detail);
+      }
+    };
+    void poll();
+    const timer = window.setInterval(poll, 900);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [taskId, state]);
+
   const handleCheck = async () => {
     if (serviceUnavailable) {
       await checkService();
@@ -147,16 +206,11 @@ export function TodayDiscovery() {
     setSummary(null);
 
     try {
-      const result = await checkTodayPapers({ daysBack, minScore, arxiv: arxivEnabled, journals: journalsEnabled });
-      setPapers(result.papers);
-      setSummary(result.summary);
-      const nextState: RunState = result.papers.length === 0 ? "empty" : hasSourceProblem(result.summary) ? "partial_success" : "success";
-      setState(nextState);
-      setToast({
-        title: nextState === "empty" ? "检索完成" : nextState === "partial_success" ? "检索部分完成" : "检索完成",
-        description: nextState === "empty" ? "没有找到匹配论文，可以调整筛选条件后重试。" : `当前显示 ${result.papers.length} 篇，候选 ${result.summary.candidateCount} 篇。`,
-        type: nextState === "partial_success" ? "warning" : "success"
-      });
+      const task = await startTodayCheckTask({ daysBack, minScore, arxiv: arxivEnabled, journals: journalsEnabled });
+      setTaskId(task.taskId);
+      setPapers(task.payload.papers);
+      setSummary(task.payload.summary);
+      setState(task.state === "running" ? "checking" : task.payload.papers.length === 0 ? "empty" : "success");
     } catch (error) {
       const nextState = stateFromError(error);
       const info = userFacingError(error);
@@ -166,9 +220,9 @@ export function TodayDiscovery() {
     }
   };
 
-  const handleOpen = (paper: Paper) => {
+  const handleOpen = async (paper: Paper) => {
     try {
-      openPaperLink(paper);
+      await openPaperLink(paper);
       setToast({ title: "正在打开论文链接", description: "将使用系统默认浏览器打开。", type: "info" });
     } catch (error) {
       setToast({ title: "无法打开论文链接", description: error instanceof Error ? error.message : "该论文暂无可用链接。", type: "error" });
@@ -176,7 +230,7 @@ export function TodayDiscovery() {
   };
 
   const copy = emptyCopy(state);
-  const tableVisible = state === "success" || state === "partial_success";
+  const tableVisible = state === "checking" || state === "success" || state === "partial_success" || state === "cancelled";
 
   return (
     <>
@@ -189,7 +243,7 @@ export function TodayDiscovery() {
               <Play className="h-4 w-4" />
               {serviceUnavailable ? "重新连接" : running ? "检索中" : "立即检查"}
             </Button>
-            <Button variant="secondary" disabled={!running} onClick={() => setState("cancelled")}>
+            <Button variant="secondary" disabled={!running} onClick={() => { void stopTodayCheck(); setState("cancelled"); }}>
               <Square className="h-4 w-4" />
               停止
             </Button>

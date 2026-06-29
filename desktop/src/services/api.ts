@@ -7,6 +7,16 @@ import { mockPapers, mockProfiles, mockSummary } from "./mock";
 export type ApiResult<T> = Promise<T>;
 export type RuntimeMode = "mock" | "real";
 export type ApiErrorKind = "local_service_unavailable" | "request_failed" | "internal_error";
+export type SearchPayload = { papers: Paper[]; summary: PaperSummary | null };
+export type SearchTask = {
+  taskId: string;
+  kind: "today" | "history";
+  state: "running" | "success" | "failed" | "cancelled";
+  payload: SearchPayload;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
 
 export class PaperRadarApiError extends Error {
   kind: ApiErrorKind;
@@ -163,6 +173,13 @@ export async function checkTodayPapers(params: { daysBack: number; minScore: num
   return requestJson<{ papers: Paper[]; summary: PaperSummary }>("/api/papers/check", { method: "POST", body: JSON.stringify(params) });
 }
 
+export async function startTodayCheckTask(params: { daysBack: number; minScore: number; arxiv: boolean; journals: boolean }): ApiResult<SearchTask> {
+  if (RUNTIME_MODE === "mock") {
+    return { taskId: "mock-today", kind: "today", state: "success", payload: mockPayload(), error: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  }
+  return requestJson<SearchTask>("/api/papers/check/task", { method: "POST", body: JSON.stringify(params) });
+}
+
 export async function getHistoryPapers(): ApiResult<{ papers: Paper[]; summary: PaperSummary }> {
   if (RUNTIME_MODE === "mock") return mockPayload();
   return requestJson<{ papers: Paper[]; summary: PaperSummary }>("/api/papers/history");
@@ -171,6 +188,40 @@ export async function getHistoryPapers(): ApiResult<{ papers: Paper[]; summary: 
 export async function startHistoryResearch(params: { taskName: string; days: number; minScore: number; arxiv: boolean; journals: boolean }): ApiResult<{ papers: Paper[]; summary: PaperSummary }> {
   if (RUNTIME_MODE === "mock") return new Promise((resolve) => setTimeout(() => resolve(mockPayload()), 800));
   return requestJson<{ papers: Paper[]; summary: PaperSummary }>("/api/history/start", { method: "POST", body: JSON.stringify(params) });
+}
+
+export async function startHistoryResearchTask(params: { taskName: string; days: number; minScore: number; arxiv: boolean; journals: boolean }): ApiResult<SearchTask> {
+  if (RUNTIME_MODE === "mock") {
+    return { taskId: "mock-history", kind: "history", state: "success", payload: mockPayload(), error: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  }
+  return requestJson<SearchTask>("/api/history/start/task", { method: "POST", body: JSON.stringify(params) });
+}
+
+export async function getSearchTask(taskId: string): ApiResult<SearchTask> {
+  if (RUNTIME_MODE === "mock") {
+    return { taskId, kind: taskId.includes("history") ? "history" : "today", state: "success", payload: mockPayload(), error: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  }
+  return requestJson<SearchTask>(`/api/tasks/${taskId}`);
+}
+
+export async function getActiveSearchTask(kind: "today" | "history"): ApiResult<SearchTask | null> {
+  if (RUNTIME_MODE === "mock") return null;
+  try {
+    return await requestJson<SearchTask>(`/api/tasks/active/${kind}`);
+  } catch (error) {
+    if (error instanceof PaperRadarApiError && error.kind === "request_failed") return null;
+    throw error;
+  }
+}
+
+export async function stopTodayCheck(): ApiResult<{ accepted: boolean }> {
+  if (RUNTIME_MODE === "mock") return { accepted: true };
+  return requestJson<{ accepted: boolean }>("/api/papers/stop", { method: "POST" });
+}
+
+export async function stopHistoryResearch(): ApiResult<{ accepted: boolean }> {
+  if (RUNTIME_MODE === "mock") return { accepted: true };
+  return requestJson<{ accepted: boolean }>("/api/history/stop", { method: "POST" });
 }
 
 export async function getProfiles(): ApiResult<ResearchProfile[]> {

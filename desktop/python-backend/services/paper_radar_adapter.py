@@ -3,7 +3,7 @@
 import sys
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
@@ -176,19 +176,27 @@ def delete_profile_payload(profile_id: str) -> dict[str, Any]:
 
 
 
-def _normalize_source_status(raw: dict[str, Any], label: str) -> dict[str, Any]:
+def _display_source_counts(papers: list[Paper]) -> dict[str, int]:
+    return {
+        "arxiv": sum(1 for paper in papers if (paper.source_type or "") == "arxiv"),
+        "journals": sum(1 for paper in papers if (paper.source_type or "") in {"crossref", "journal_rss"}),
+    }
+
+
+def _normalize_source_status(raw: dict[str, Any], label: str, displayed: int | None = None) -> dict[str, Any]:
     status = str(raw.get("status") or "pending")
     if status == "empty":
         status = "success"
     if status not in {"success", "partial", "failed", "timeout", "disabled", "pending"}:
         status = "pending"
+    stored = int(raw.get("stored", 0) or 0)
     return {
         "label": label,
         "enabled": bool(raw.get("enabled", True)),
         "status": status,
         "fetched": int(raw.get("raw", raw.get("fetched", 0)) or 0),
-        "stored": int(raw.get("stored", 0) or 0),
-        "displayed": int(raw.get("stored", raw.get("displayed", 0)) or 0),
+        "stored": stored,
+        "displayed": max(0, int(displayed if displayed is not None else raw.get("displayed", stored) or 0)),
         "failed": int(raw.get("failed", 0) or 0),
         "error": raw.get("reason") or raw.get("error") or None,
     }
@@ -196,17 +204,42 @@ def _normalize_source_status(raw: dict[str, Any], label: str) -> dict[str, Any]:
 
 def summary_from_run(papers: list[Paper], stats: dict[str, Any]) -> dict[str, Any]:
     source_status = stats.get("source_status") or {}
+    candidate_count = int(stats.get("deduped", len(papers)) or 0)
+    displayed_count = len(papers)
+    displayed_sources = _display_source_counts(papers)
+    normalized_arxiv = _normalize_source_status(source_status.get("arxiv", {}), "arXiv", displayed_sources["arxiv"])
+    normalized_journals = _normalize_source_status(source_status.get("top", {}), "顶级期刊", displayed_sources["journals"])
+    fatal_failed_count = sum(
+        1
+        for source in (normalized_arxiv, normalized_journals)
+        if source["enabled"] and source["status"] in {"failed", "timeout"} and int(source.get("fetched", 0) or 0) == 0
+    )
     return {
         "totalFetched": int(stats.get("raw", len(papers)) or 0),
-        "candidateCount": int(stats.get("deduped", len(papers)) or 0),
-        "displayedCount": int(stats.get("displayed", len(papers)) or 0),
-        "hiddenCount": 0,
-        "failedCount": int(stats.get("failed", 0) or 0),
+        "candidateCount": candidate_count,
+        "displayedCount": displayed_count,
+        "hiddenCount": max(0, candidate_count - displayed_count),
+        "failedCount": fatal_failed_count,
         "sources": {
-            "arxiv": _normalize_source_status(source_status.get("arxiv", {}), "arXiv"),
-            "journals": _normalize_source_status(source_status.get("top", {}), "顶级期刊"),
+            "arxiv": normalized_arxiv,
+            "journals": normalized_journals,
         },
     }
+
+
+def payload_from_scored_papers(papers: list[Paper], stats: dict[str, Any], min_score: int = 0) -> dict[str, Any]:
+    filtered = [paper for paper in papers if int(paper.relevance_score or 0) >= int(min_score or 0)]
+    return {"papers": [paper_to_api(paper) for paper in filtered], "summary": summary_from_run(filtered, stats)}
+
+
+def _progress_payload(payload: Any, min_score: int) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    papers = payload.get("papers")
+    if not isinstance(papers, list):
+        return None
+    stats = {key: value for key, value in payload.items() if key != "papers"}
+    return payload_from_scored_papers(papers, stats, min_score=min_score)
 
 
 def run_today_check_payload(days_back: int = 7, min_score: int = 0, arxiv: bool = True, journals: bool = True) -> dict[str, Any]:
@@ -217,6 +250,31 @@ def run_today_check_payload(days_back: int = 7, min_score: int = 0, arxiv: bool 
     result = service.run()
     papers = [paper for paper in result.papers if int(paper.relevance_score or 0) >= int(min_score or 0)]
     return {"papers": [paper_to_api(paper) for paper in papers], "summary": summary_from_run(papers, result.stats)}
+
+
+def run_today_check_with_progress(
+    days_back: int = 7,
+    min_score: int = 0,
+    arxiv: bool = True,
+    journals: bool = True,
+    should_stop: Callable[[], bool] | None = None,
+    progress: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    progress = progress or (lambda _payload: None)
+    service = DailySearchService(
+        days_back=max(1, int(days_back or 7)),
+        sources={"arxiv": bool(arxiv), "rss": bool(journals), "crossref": bool(journals)},
+    )
+
+    def on_progress(_event: str, payload: Any) -> None:
+        next_payload = _progress_payload(payload, min_score)
+        if next_payload is not None:
+            progress(next_payload)
+
+    result = service.run(should_stop=should_stop, progress=on_progress)
+    final_payload = payload_from_scored_papers(result.papers, result.stats, min_score=min_score)
+    progress(final_payload)
+    return final_payload
 
 
 def run_history_survey_payload(days: int = 365, min_score: int = 0, arxiv: bool = True, journals: bool = True, task_name: str = "当前方向历史调研") -> dict[str, Any]:
@@ -231,5 +289,35 @@ def run_history_survey_payload(days: int = 365, min_score: int = 0, arxiv: bool 
     result = service.run()
     papers = [paper for paper in result.papers if int(paper.relevance_score or 0) >= int(min_score or 0)]
     return {"papers": [paper_to_api(paper) for paper in papers], "summary": summary_from_run(papers, result.stats)}
+
+
+def run_history_survey_with_progress(
+    days: int = 365,
+    min_score: int = 0,
+    arxiv: bool = True,
+    journals: bool = True,
+    task_name: str = "当前方向历史调研",
+    should_stop: Callable[[], bool] | None = None,
+    progress: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    progress = progress or (lambda _payload: None)
+    until = date.today()
+    since = until - timedelta(days=max(1, int(days or 365)))
+    service = HistoricalSurveyService(
+        task_name=task_name or "当前方向历史调研",
+        from_date=since,
+        until_date=until,
+        sources={"arxiv": bool(arxiv), "rss": bool(journals), "crossref": bool(journals)},
+    )
+
+    def on_progress(_event: str, payload: Any) -> None:
+        next_payload = _progress_payload(payload, min_score)
+        if next_payload is not None:
+            progress(next_payload)
+
+    result = service.run(should_stop=should_stop, progress=on_progress)
+    final_payload = payload_from_scored_papers(result.papers, result.stats, min_score=min_score)
+    progress(final_payload)
+    return final_payload
 
 

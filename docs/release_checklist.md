@@ -2,11 +2,11 @@
 
 1. Update the version number.
 2. Run the test suite.
-3. Start the development build with `python run.py`.
+3. Start the development build with `cd desktop; npm run desktop:dev`.
 4. Confirm user data under `%APPDATA%\PaperRadar` is not overwritten.
 5. Clean `build` and `dist`.
-6. Run `build_scripts\build_exe.ps1`.
-7. Run `build_scripts\build_installer.ps1`.
+6. Rebuild the Python sidecar into `desktop\src-tauri\binaries`.
+7. Run `cd desktop; npm run desktop:build`.
 8. Install the generated setup package.
 9. Test overwrite installation from the previous version.
 10. Confirm old user Profiles are preserved.

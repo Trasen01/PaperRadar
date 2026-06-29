@@ -5,7 +5,9 @@
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\pip install -r requirements.txt
-.\.venv\Scripts\python run.py
+cd desktop
+npm install
+npm run desktop:dev
 ```
 
 ## Tests
@@ -14,21 +16,15 @@ python -m venv .venv
 .\.venv\Scripts\python -m pytest tests
 ```
 
-## Build EXE
+## Build Desktop App
 
 ```powershell
-.\build_scripts\build_exe.ps1 -Python .\.venv\Scripts\python.exe
+cd desktop
+npm run desktop:build
 ```
 
-## Build Installer
-
-Install Inno Setup 6, then run:
-
-```powershell
-.\build_scripts\build_installer.ps1 -Python .\.venv\Scripts\python.exe
-```
-
-The installer is written to `dist\installer`.
+The Tauri build writes the app executable and NSIS installer under
+`desktop\src-tauri\target\release`.
 
 ## Runtime Data
 

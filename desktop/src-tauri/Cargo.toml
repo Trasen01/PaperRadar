@@ -1,6 +1,6 @@
 [package]
 name = "paperradar"
-version = "0.3.0"
+version = "0.4.0"
 description = "PaperRadar desktop shell"
 authors = ["PaperRadar"]
 edition = "2021"

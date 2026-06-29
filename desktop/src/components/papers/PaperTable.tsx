@@ -9,7 +9,7 @@ type PaperTableProps = {
   title: string;
   papers: Paper[];
   totalCount: number;
-  onOpen: (paper: Paper) => void;
+  onOpen: (paper: Paper) => void | Promise<void>;
   onSelect: (paper: Paper) => void;
   onPrimaryAction?: () => void;
   emptyActionLabel: string;
@@ -83,7 +83,7 @@ export function PaperTable({
         </div>
       ) : (
         <div className="max-h-[620px] min-h-[420px] overflow-auto">
-          <div className="min-w-[1280px]">
+          <div className="min-w-[1540px]">
             <div className="paper-table-grid sticky top-0 z-10 grid items-center border-b border-slate-200 bg-slate-50/95 px-4 py-3 text-center text-xs font-semibold text-slate-500 backdrop-blur">
               <div>分数</div>
               <div>来源</div>
@@ -98,15 +98,15 @@ export function PaperTable({
               return (
                 <div
                   key={paper.id}
-                  className="paper-table-grid grid min-h-[44px] cursor-default items-center border-b border-slate-100 px-4 py-2 text-sm transition hover:bg-blue-50/50"
+                  className="paper-table-grid grid min-h-[52px] cursor-default items-center border-b border-slate-100 px-4 py-2 text-sm transition hover:bg-blue-50/50"
                   onClick={() => onSelect(paper)}
-                  onDoubleClick={() => onOpen(paper)}
+                  onDoubleClick={() => { void onOpen(paper); }}
                 >
                   <div className="flex justify-center">
                     <Badge variant={scoreVariant(paper.score)}>{paper.score}</Badge>
                   </div>
                   <div className="flex justify-center">
-                    <Badge className="min-w-[96px] max-w-[128px] justify-center truncate" variant={sourceVariant(sourceLabel)} title={sourceLabel}>
+                    <Badge className="w-full min-w-0 justify-center whitespace-normal px-3 text-center leading-4" variant={sourceVariant(sourceLabel)} title={sourceLabel}>
                       {sourceLabel}
                     </Badge>
                   </div>
@@ -117,9 +117,9 @@ export function PaperTable({
                     {shortAuthors(paper.authors)}
                   </div>
                   <div className="text-center text-slate-500">{paper.publishedDate}</div>
-                  <div className="flex min-w-0 justify-center gap-1.5 overflow-hidden px-2">
+                  <div className="flex min-w-0 flex-wrap justify-center gap-1.5 px-2">
                     {paper.matchedKeywords.slice(0, 3).map((keyword) => (
-                      <Badge key={keyword} variant="slate" className="min-w-0 max-w-[96px] truncate px-2 font-medium" title={paper.matchedKeywords.join(", ")}>
+                      <Badge key={keyword} variant="slate" className="min-w-0 whitespace-normal px-2 text-center font-medium leading-4" title={paper.matchedKeywords.join(", ")}>
                         {keyword}
                       </Badge>
                     ))}
@@ -131,7 +131,7 @@ export function PaperTable({
                       disabled={!paper.url}
                       onClick={(event) => {
                         event.stopPropagation();
-                        onOpen(paper);
+                        void onOpen(paper);
                       }}
                       className={cn("h-8 w-[76px] justify-center", paper.url && "text-blue-700")}
                     >

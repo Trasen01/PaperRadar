@@ -28,6 +28,14 @@ function iconFor(status: string) {
   return <CircleDashed className="h-4 w-4 text-slate-400" />;
 }
 
+function shortError(error: string) {
+  const lower = error.toLowerCase();
+  if (lower.includes("read timed out") || lower.includes("timeout")) return "接口超时";
+  if (lower.includes("500 server error")) return "接口异常";
+  if (lower.includes("ssl")) return "证书握手失败";
+  return error.length > 26 ? `${error.slice(0, 26)}...` : error;
+}
+
 export function SourceStatusBar({ sources }: SourceStatusBarProps) {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -39,7 +47,7 @@ export function SourceStatusBar({ sources }: SourceStatusBarProps) {
           <span className="text-xs text-slate-500">
             抓取 {source.fetched} · 显示 {source.displayed} · 失败 {source.failed}
           </span>
-          {source.error && <span className="text-xs text-amber-700">可查看失败详情</span>}
+          {source.error && <span className="max-w-[240px] truncate text-xs text-amber-700" title={source.error}>{shortError(source.error)}</span>}
         </div>
       ))}
     </div>

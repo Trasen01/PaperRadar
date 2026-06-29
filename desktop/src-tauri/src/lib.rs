@@ -115,12 +115,26 @@ fn ensure_local_service(app: tauri::AppHandle) -> Result<(), String> {
     start_backend(&app, false)
 }
 
+#[tauri::command]
+fn open_external_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    let trimmed = url.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if !(lower.starts_with("https://") || lower.starts_with("http://")) {
+        return Err("Only http and https links can be opened.".to_string());
+    }
+    app.shell().open(trimmed, None).map_err(|error| {
+        let message = format!("open external link failed: {error}");
+        write_service_log(&message);
+        message
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(BackendState(Mutex::new(None)))
-        .invoke_handler(tauri::generate_handler![restart_local_service, ensure_local_service])
+        .invoke_handler(tauri::generate_handler![restart_local_service, ensure_local_service, open_external_url])
         .setup(|app| {
             if let Err(error) = start_backend(&app.handle(), false) {
                 write_service_log(format!("setup start failed: {error}"));

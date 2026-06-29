@@ -175,16 +175,19 @@ class CrossrefClient:
             "sort": "published",
             "order": "desc",
         }
-        response = retry_call(
-            lambda: self.session.get(CROSSREF_API, params=params, timeout=self.timeout),
+        def request_items() -> list[dict[str, Any]]:
+            response = self.session.get(CROSSREF_API, params=params, timeout=self.timeout)
+            response.raise_for_status()
+            return response.json().get("message", {}).get("items", []) or []
+
+        return retry_call(
+            request_items,
             source_type="crossref",
             query=f"{journal.get('name')} | {query}",
             timeout=self.timeout,
             max_retries=self.max_retries,
             retry_delay_seconds=self.retry_delay_seconds,
         )
-        response.raise_for_status()
-        return response.json().get("message", {}).get("items", []) or []
 
     def _item_to_paper(self, journal: dict[str, Any], item: dict[str, Any]) -> Paper:
         title = normalize_space(" ".join(item.get("title") or []))
